@@ -1,0 +1,25 @@
+/* --------------------------
+   Global Icon Fonts for Web
+   -------------------------- */
+
+/* Ionicons */
+@font-face {
+  font-family: "Ionicons";
+  src: url("/fonts/Ionicons.woff2") format("woff2"),
+    url("/fonts/Ionicons.woff") format("woff"),
+    url("/fonts/Ionicons.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Feather Icons */
+@font-face {
+  font-family: "Feather";
+  src: url("/fonts/Feather.woff2") format("woff2"),
+    url("/fonts/Feather.woff") format("woff"),
+    url("/fonts/Feather.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}

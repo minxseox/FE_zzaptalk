@@ -1,0 +1,71 @@
+# -----------------------------------------------------------------
+# Learn more: https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# -----------------------------------------------------------------
+
+# =========================
+# DEPENDENCIES
+# =========================
+/node_modules
+
+# =========================
+# BUILD / OUTPUT
+# =========================
+dist-ssr/
+web-build/
+coverage/
+
+# =========================
+# EXPO / METRO
+# =========================
+.expo/
+expo-env.d.ts
+.metro-health-check*
+
+# =========================
+# NATIVE (generated / secrets)
+# =========================
+ios/
+android/
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# =========================
+# LOGS
+# =========================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# =========================
+# ENV / LOCAL CONFIG  (🚨 keep secrets out of git)
+# =========================
+.env
+.env.local
+.env.*.local
+.env*.local
+*.local
+
+# =========================
+# IDE / OS
+# =========================
+.vscode/
+.idea/
+.DS_Store
+*.pem
+
+# =========================
+# TYPESCRIPT
+# =========================
+*.tsbuildinfo
+
+# =========================
+# EXAMPLES / MISC
+# =========================
+app-example/
