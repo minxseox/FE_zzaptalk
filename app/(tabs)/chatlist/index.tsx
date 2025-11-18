@@ -210,7 +210,7 @@ export default function ChatListScreen() {
                   <TextInput
                     style={styles.sheetInput}
                     value={partnerId}
-                    placeholder="예) 2"
+                    placeholder="예) 1"
                     onChangeText={setPartnerId}
                     keyboardType="numeric"
                   />

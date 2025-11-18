@@ -251,13 +251,26 @@ export default function ChatRoomScreen() {
     ({ item }: { item: ChatMessageResponse }) => {
       const mine = myId != null && item.senderId === myId;
 
+      const timeLabel = new Date(item.createdAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
       return (
         <View
           style={[styles.msgRow, mine ? styles.msgRowMine : styles.msgRowOther]}
         >
+          {/* 상대 메시지일 때만 왼쪽에 아바타 자리 확보 */}
           {!mine && <View style={{ width: 34, marginRight: 8 }} />}
 
           <View style={styles.bubbleLine}>
+            {/* ✅ 내가 보낸 메시지: 시간 ← 말풍선 */}
+            {mine && (
+              <Text style={[styles.timeBeside, styles.timeBesideMine]}>
+                {timeLabel}
+              </Text>
+            )}
+
             <View
               style={[
                 styles.bubble,
@@ -272,17 +285,12 @@ export default function ChatRoomScreen() {
               </Text>
             </View>
 
-            <Text
-              style={[
-                styles.timeBeside,
-                mine ? styles.timeBesideMine : styles.timeBesideOther,
-              ]}
-            >
-              {new Date(item.createdAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </Text>
+            {/* ✅ 상대가 보낸 메시지: 말풍선 → 시간 */}
+            {!mine && (
+              <Text style={[styles.timeBeside, styles.timeBesideOther]}>
+                {timeLabel}
+              </Text>
+            )}
           </View>
         </View>
       );
@@ -431,11 +439,18 @@ const styles = StyleSheet.create({
   timeBeside: {
     fontSize: 11,
     color: "#8E8E8E",
-    marginHorizontal: 6,
     alignSelf: "flex-end",
   },
-  timeBesideMine: { textAlign: "left" },
-  timeBesideOther: { textAlign: "right" },
+  timeBesideMine: {
+    textAlign: "left",
+    marginRight: 4, // 시간과 bubble 사이
+    marginLeft: 0,
+  },
+  timeBesideOther: {
+    textAlign: "right",
+    marginLeft: 4, // bubble과 시간 사이
+    marginRight: 0,
+  },
 
   // --- Input Bar ---
   inputBar: {
