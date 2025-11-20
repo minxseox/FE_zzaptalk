@@ -17,6 +17,9 @@ const norm = (p: string) => {
   return q === "/" ? "/" : q.replace(/\/+$/, "");
 };
 
+// 🔥 서버 안 돌아갈 때만 true 로 두기 (나중에 꼭 false/삭제)
+const DEV_BYPASS_AUTH = true;
+
 export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
@@ -41,6 +44,8 @@ export default function RootLayout() {
   useEffect(() => {
     let alive = true;
     (async () => {
+      // DEV_BYPASS_AUTH 켜져 있어도 그냥 세션 복구 시도는 해도 되고,
+      // 귀찮으면 이 블록도 조건으로 감싸도 됨.
       const ok = await restoreSession();
       if (!alive) return;
       setLoggedIn(!!ok);
@@ -55,6 +60,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (!rootNav?.key || !ready) return;
+
+    // ✅ 개발용: 인증 우회 시 리다이렉트 로직 자체를 막음
+    if (DEV_BYPASS_AUTH) {
+      return;
+    }
 
     const curr = norm(pathname);
     let to: string | null = null;
