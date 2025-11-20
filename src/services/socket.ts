@@ -3,22 +3,21 @@ import { Client, IMessage, StompHeaders } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import type { ChatMessageResponse, MessageType } from "../types/chat";
 
-// .env 예) EXPO_PUBLIC_WS_BASE=https://api.zzaptalk.com/ws-stomp  (뒤에 / 없음)
+// .env 예) EXPO_PUBLIC_WS_BASE=https://api.zzaptalk.com/ws-stomp
 const WS_BASE = (
   process.env.EXPO_PUBLIC_WS_BASE || "https://api.zzaptalk.com/ws"
 ).replace(/\/+$/, "");
 
 // 내부 상태
 let client: Client | null = null;
-let unsub: (() => void) | null = null;
-let connected = false;
+// 연결 상태를 Promise로 관리 (연결 완료 대기용)
+let connectionPromise: Promise<void> | null = null;
 
-// 날짜를 ISO 문자열로 안전 변환
+// 날짜 변환 유틸
 function toIso(v?: any): string {
   if (!v) return new Date().toISOString();
   if (v instanceof Date) return v.toISOString();
   if (typeof v === "number") {
-    // epoch seconds 가능성까지 허용
     const ms = v < 1e12 ? v * 1000 : v;
     return new Date(ms).toISOString();
   }
@@ -30,7 +29,7 @@ function toIso(v?: any): string {
   return new Date(v).toISOString();
 }
 
-// 수신 payload → ChatMessageResponse 정규화
+// 데이터 정규화
 function normalize(body: any): ChatMessageResponse {
   const msgId =
     typeof body?.messageId === "number" || typeof body?.messageId === "string"
@@ -43,7 +42,6 @@ function normalize(body: any): ChatMessageResponse {
   const created =
     body?.createdAt ?? body?.sentAt ?? body?.time ?? body?.timestamp;
 
-  // 서버에서 type을 안 보내는 경우 기본 TEXT
   const typ: MessageType =
     (body?.type as MessageType) &&
     ["TEXT", "IMAGE", "ENTER", "LEAVE"].includes(body.type)
@@ -64,97 +62,96 @@ function normalize(body: any): ChatMessageResponse {
   };
 }
 
-// ✅ 연결 + 해당 room 구독
-export function connectStomp(
-  roomId: number,
-  onMessage: (msg: ChatMessageResponse) => void,
-  token?: string
-) {
-  if (client?.active) return; // 이미 연결 시 무시
+// ✅ 1. 소켓 연결 (구독 X, 연결만 O)
+export function connectStomp(token: string): Promise<void> {
+  // 이미 연결되어 있거나 연결 중이면 기존 Promise 반환
+  if (client?.connected) return Promise.resolve();
+  if (connectionPromise) return connectionPromise;
 
-  client = new Client({
-    webSocketFactory: () => new SockJS(WS_BASE || "/ws-stomp"),
-    connectHeaders: token
-      ? ({ Authorization: `Bearer ${token}` } as StompHeaders)
-      : undefined,
-    // debug: (m) => console.log("[STOMP]", m),
-    onConnect: () => {
-      connected = true;
-      // 방 구독
-      const sub = client!.subscribe(
-        `/topic/chatlist.${roomId}`,
-        (frame: IMessage) => {
-          try {
-            const body = JSON.parse(frame.body);
-            onMessage(normalize(body));
-          } catch (e) {
-            console.warn("STOMP parse error:", e);
-          }
-        }
-      );
-      unsub = () => sub.unsubscribe();
-    },
-    onWebSocketClose: () => {
-      connected = false;
-      unsub = null;
-      // console.warn("🔌 socket closed");
-    },
-    onStompError: (f) => {
-      connected = false;
-      unsub = null;
-      console.error("❌ STOMP error:", f.headers["message"]);
-    },
+  connectionPromise = new Promise((resolve, reject) => {
+    client = new Client({
+      webSocketFactory: () => new SockJS(WS_BASE || "/ws-stomp"),
+      connectHeaders: {
+        Authorization: `Bearer ${token}`,
+      },
+      // 디버그 보고 싶으면 아래 주석 해제
+      // debug: (str) => console.log("[STOMP Debug]", str),
+
+      onConnect: () => {
+        console.log("✅ STOMP Connected!");
+        resolve();
+      },
+      onStompError: (frame) => {
+        console.error("❌ STOMP Error", frame.headers["message"]);
+        reject(new Error(frame.headers["message"]));
+        connectionPromise = null; // 에러 나면 초기화
+      },
+      onWebSocketClose: () => {
+        console.log("🔌 WebSocket Closed");
+        connectionPromise = null; // 닫히면 초기화
+      },
+    });
+
+    client.activate();
   });
 
-  client.activate();
+  return connectionPromise;
 }
 
-// ✅ 해제
+// ✅ 2. 채팅방 구독 (이게 분리되어야 함!)
+export function subscribeRoom(
+  roomId: number,
+  onMessage: (msg: ChatMessageResponse) => void
+) {
+  if (!client || !client.connected) {
+    console.warn("⚠️ 소켓이 연결되지 않아 구독할 수 없습니다.");
+    return () => {};
+  }
+
+  // 백엔드가 알려준 구독 경로: /topic/chatlist.{roomId}
+  const subscription = client.subscribe(
+    `/topic/chatlist.${roomId}`,
+    (frame: IMessage) => {
+      try {
+        const body = JSON.parse(frame.body);
+        onMessage(normalize(body));
+      } catch (e) {
+        console.error("Json Parse Error:", e);
+      }
+    }
+  );
+
+  // 구독 취소 함수 반환 (useEffect의 return에서 사용됨)
+  return () => subscription.unsubscribe();
+}
+
+// ✅ 3. 연결 해제
 export function disconnectStomp() {
-  try {
-    unsub?.();
-    client?.deactivate();
-  } finally {
-    unsub = null;
+  if (client) {
+    client.deactivate();
     client = null;
-    connected = false;
+    connectionPromise = null;
   }
 }
 
-export function isConnected() {
-  return !!client?.connected && connected;
-}
-
-/**
- * ✅ 메시지 전송
- * - STOMP destination: /app/chat/message
- * - Body: { roomId, content, type }
- * - Content-Type: application/json
- *
- * ChatRoomScreen 쪽에서는 sendCompat으로
- * (roomId, myId, content) 를 넘기지만,
- * 여기서는 백엔드 명세에 맞게 senderId는 실제 전송에서는 쓰지 않음.
- */
+// ✅ 4. 메시지 전송
 export async function sendChatMessage(
   roomId: number,
-  senderId: number, // 넘어오지만 실제 payload에는 포함 X
+  senderId: number, // 백엔드 DTO엔 없지만 호환성 위해 받음
   content: string,
-  type: MessageType = "TEXT",
-  senderName?: string // 이것도 전송 X (백엔드 DTO에 없음)
+  type: MessageType = "TEXT"
 ) {
   if (!client || !client.connected) throw new Error("STOMP not connected");
 
   const payload = {
-    roomId, // Long
-    content, // String
-    type, // "TEXT" | "IMAGE" ...
+    roomId,
+    content,
+    type,
   };
 
   client.publish({
     destination: "/app/chat/message",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
