@@ -10,9 +10,12 @@ import {
   View,
   Keyboard,
   TouchableWithoutFeedback,
+  StyleSheet,
+  Image, // 🔹 추가 (내 프로필 사진용)
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 
 import styles from "../../../src/styles/friends/Friends.module";
 import modalStyles from "../../../src/styles/friends/FriendAddModal.module";
@@ -21,76 +24,163 @@ import {
   getFriendList,
   addFriend,
   deleteFriend,
+  createFriendGroup,
+  addFriendToGroup,
 } from "../../../src/services/friends";
+import { fetchMyProfile } from "../../../src/services/profile"; // 🔹 내 프로필 API
 import type { FriendListResponseDto } from "../../../src/types/friends";
 
 type Friend = {
-  id: number;
+  id: number; // 사용자 ID (userId)
+  friendshipId: number; // 친구 관계 ID (friendshipId)
   name: string;
+  isFavorite?: boolean;
+  groupName?: string | null;
 };
 
-const MY_NAME = "김민서";
+type FriendGroup = {
+  name: string;
+  friends: Friend[];
+};
 
-/** 전화번호 자동 하이픈 포맷터 (010-1234-5678) */
+// 🔹 하드코딩 이름 제거 → 상태로 관리 (기본값 "사용자")
+// const MY_NAME = "김민서";
+
+/** 전화번호 자동 하이픈 포맷터 */
 function formatPhoneNumber(value: string) {
-  const digits = value.replace(/\D/g, ""); // 숫자만
-
+  const digits = value.replace(/\D/g, "");
   if (digits.length < 4) return digits;
   if (digits.length < 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
   if (digits.length < 11)
     return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
-
   return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
 }
 
 export default function FriendsScreen() {
-  // 🔹 친구 목록 상태
-  const [friends, setFriends] = useState<Friend[]>([]);
+  // 🔹 내 프로필 (상단 영역)
+  const [myName, setMyName] = useState("사용자"); // 기본값: "사용자"
+  const [myAvatarUri, setMyAvatarUri] = useState<string | null>(null);
 
-  // 🔹 친구 추가 모달 상태
+  // 🔹 친구 목록
+  const [friends, setFriends] = useState<Friend[]>([]);
+  // 🔹 서버 + 로컬 그룹
+  const [groups, setGroups] = useState<FriendGroup[]>([]);
+  // 🔹 필터 탭
+  const [filterTab, setFilterTab] = useState<"ALL" | "FAVORITE" | "GROUP">(
+    "ALL"
+  );
+  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(
+    null
+  );
+
+  // 🔹 그룹 관리 모달
+  const [groupModalVisible, setGroupModalVisible] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [groupSelectIds, setGroupSelectIds] = useState<number[]>([]);
+
+  // 🔹 친구 추가 모달
   const [addVisible, setAddVisible] = useState(false);
   const [addType, setAddType] = useState<"PHONE" | "ZZAPID">("PHONE");
   const [identifier, setIdentifier] = useState("");
   const [adding, setAdding] = useState(false);
 
-  // 🔹 친구 목록 로드 함수
+  /** 🔸 친구 목록 로드 */
   const loadFriends = async () => {
     try {
       const data: FriendListResponseDto = await getFriendList();
-
-      const merged: Friend[] = [
-        ...(data.birthdayFriends || []),
-        ...(data.favoriteFriends || []),
-        ...(data.customGroups || []).flatMap((g) => g.friends || []),
-        ...(data.otherFriends || []),
-      ].map((f) => ({
-        id: f.userId,
-        name: f.nickname,
-      }));
-
       const map = new Map<number, Friend>();
-      merged.forEach((f) => {
-        if (!map.has(f.id)) map.set(f.id, f);
-      });
+
+      const upsert = (f: Friend) => {
+        const prev = map.get(f.id);
+        if (!prev) {
+          map.set(f.id, f);
+        } else {
+          map.set(f.id, {
+            ...prev,
+            ...f,
+            isFavorite: prev.isFavorite || f.isFavorite,
+            groupName: prev.groupName ?? f.groupName ?? null,
+          });
+        }
+      };
+
+      // 생일 친구
+      // 생일 친구
+      (data.birthdayFriends || []).forEach((f: any) =>
+        upsert({
+          id: f.userId,
+          friendshipId: f.friendshipId,
+          name: f.nickname,
+        })
+      );
+
+      // 즐겨찾기
+      (data.favoriteFriends || []).forEach((f: any) =>
+        upsert({
+          id: f.userId,
+          friendshipId: f.friendshipId,
+          name: f.nickname,
+          isFavorite: true,
+        })
+      );
+
+      // 커스텀 그룹
+      const serverGroups: FriendGroup[] = (data.customGroups || []).map(
+        (g: any) => {
+          const groupName = g.groupName ?? g.name ?? "그룹";
+          const groupFriends: Friend[] = (g.friends || []).map((f: any) => {
+            const friend: Friend = {
+              id: f.userId,
+              friendshipId: f.friendshipId,
+              name: f.nickname,
+              groupName,
+            };
+            upsert(friend);
+            return friend;
+          });
+          return { name: groupName, friends: groupFriends };
+        }
+      );
+
+      // 기타 친구
+      (data.otherFriends || []).forEach((f: any) =>
+        upsert({
+          id: f.userId,
+          friendshipId: f.friendshipId,
+          name: f.nickname,
+        })
+      );
 
       setFriends(Array.from(map.values()));
+      setGroups(serverGroups);
     } catch (e: any) {
       console.error(e);
       Alert.alert("오류", "친구 목록을 불러오지 못했어요.");
     }
   };
 
-  // 🔹 마운트 시 친구 목록 불러오기
   useEffect(() => {
     loadFriends();
   }, []);
 
-  // 🔹 친구 추가 처리
+  /** 🔸 내 프로필 정보 로드 (상단 아바타 + 이름) */
+  useEffect(() => {
+    (async () => {
+      try {
+        const me = await fetchMyProfile(); // GET /api/v1/users/profile
+        setMyName(me.nickname || me.name || "사용자"); // 나중에 로그인 사용자 이름 자동 반영
+        setMyAvatarUri(me.profilePhotoUrl || null);
+      } catch (e) {
+        console.error("내 프로필 로드 실패:", e);
+        // 실패해도 기본값 "사용자"로 그냥 둠
+      }
+    })();
+  }, []);
+
+  /** 🔸 친구 추가 */
   const handleAddFriend = async () => {
     const raw = identifier.trim();
-
-    // PHONE일 때는 숫자만 추출해서 API에 보냄
-    const cleaned = addType === "PHONE" ? raw.replace(/\D/g, "") : raw; // ← 하이픈 제거!
+    const cleaned = addType === "PHONE" ? raw.replace(/\D/g, "") : raw;
 
     if (!cleaned) {
       Alert.alert(
@@ -102,7 +192,6 @@ export default function FriendsScreen() {
       return;
     }
 
-    // (선택) 간단한 길이 체크
     if (addType === "PHONE" && cleaned.length < 10) {
       Alert.alert("알림", "전화번호를 다시 확인해 주세요.");
       return;
@@ -110,30 +199,24 @@ export default function FriendsScreen() {
 
     setAdding(true);
     try {
-      const msg = await addFriend({
-        identifier: cleaned, // ← 하이픈 제거된 값 전송
-        type: addType,
-      });
+      const msg = await addFriend({ identifier: cleaned, type: addType });
 
       Alert.alert("완료", msg || "친구가 추가되었습니다.");
       setIdentifier("");
       setAddVisible(false);
-
       await loadFriends();
     } catch (e: any) {
       const msg =
         e?.response?.data ||
         e?.message ||
-        (addType === "PHONE"
-          ? "친구를 추가하지 못했어요. 전화번호를 다시 확인해 주세요."
-          : "친구를 추가하지 못했어요. ZzapID를 다시 확인해 주세요.");
+        "친구를 추가하지 못했어요. 다시 확인해 주세요.";
       Alert.alert("오류", msg);
     } finally {
       setAdding(false);
     }
   };
 
-  // 🔹 친구 삭제 처리 (친구 항목 길게 누르면 삭제)
+  /** 🔸 친구 삭제 (길게 누르기) */
   const handleDeleteFriend = (friendId: number) => {
     Alert.alert("친구 삭제", "정말 이 친구를 삭제할까요?", [
       { text: "취소", style: "cancel" },
@@ -142,21 +225,85 @@ export default function FriendsScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            await deleteFriend(friendId); // ← 이제 void
-
-            // 목록에서 제거
+            await deleteFriend(friendId);
             setFriends((prev) => prev.filter((f) => f.id !== friendId));
-
-            Alert.alert("완료", "친구가 삭제되었습니다.");
-          } catch (e: any) {
-            Alert.alert(
-              "오류",
-              e?.message || "친구 삭제 중 오류가 발생했어요."
+            // 그룹에서도 제거
+            setGroups((prev) =>
+              prev.map((g) => ({
+                ...g,
+                friends: g.friends.filter((f) => f.id !== friendId),
+              }))
             );
+          } catch (e: any) {
+            Alert.alert("오류", "친구 삭제 중 오류가 발생했어요.");
           }
         },
       },
     ]);
+  };
+
+  /** 🔸 현재 탭에 맞게 필터링 */
+  const filteredFriends = (() => {
+    if (filterTab === "FAVORITE") {
+      return friends.filter((f) => f.isFavorite);
+    }
+    if (filterTab === "GROUP") {
+      if (!selectedGroupName) return [];
+      return friends.filter((f) => f.groupName === selectedGroupName);
+    }
+    return friends;
+  })();
+
+  /** 🔸 그룹 생성 핸들러 (프론트 상태만) */
+  /** 🔸 그룹 생성 핸들러 (서버 연동) */
+  const handleCreateGroup = async () => {
+    const name = newGroupName.trim();
+    if (!name) return;
+
+    if (groupSelectIds.length === 0) {
+      Alert.alert("알림", "그룹에 넣을 친구를 선택해 주세요.");
+      return;
+    }
+
+    try {
+      // 1) 그룹 생성
+      const group = await createFriendGroup({ groupName: name });
+
+      // 2) 선택한 친구들을 그룹에 추가
+      const selectedFriends = friends.filter((f) =>
+        groupSelectIds.includes(f.id)
+      );
+
+      await Promise.all(
+        selectedFriends
+          .filter((f) => typeof f.friendshipId === "number")
+          .map((f) =>
+            addFriendToGroup({
+              groupId: group.id,
+              friendshipId: f.friendshipId,
+            })
+          )
+      );
+
+      // 3) 서버 상태 기준으로 친구/그룹 리스트 재로딩
+      await loadFriends();
+
+      // 4) 방금 만든 그룹으로 필터 전환
+      setSelectedGroupName(group.groupName);
+      setFilterTab("GROUP");
+
+      // 5) 모달 초기화
+      setNewGroupName("");
+      setGroupSelectIds([]);
+      setGroupModalVisible(false);
+    } catch (e: any) {
+      console.error("그룹 생성 / 그룹에 친구 추가 실패:", e);
+      const msg =
+        e?.response?.data ||
+        e?.message ||
+        "그룹 생성 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.";
+      Alert.alert("오류", msg);
+    }
   };
 
   return (
@@ -169,7 +316,6 @@ export default function FriendsScreen() {
           <View style={styles.headerRight}>
             <Ionicons name="search" size={20} style={styles.headerIcon} />
 
-            {/* 🔹 친구추가 버튼 */}
             <Pressable onPress={() => setAddVisible(true)}>
               <Ionicons
                 name="person-add-outline"
@@ -186,28 +332,89 @@ export default function FriendsScreen() {
           </View>
         </View>
 
-        {/* 내 프로필 */}
-        <View style={styles.myProfileSection}>
-          <View style={styles.myProfileAvatar} />
-          <Text style={styles.myProfileName}>{MY_NAME}</Text>
-        </View>
+        {/* 내 프로필 (눌렀을 때 /profile로 이동) */}
+        <Pressable
+          style={styles.myProfileSection}
+          onPress={() => router.push("/profile")}
+        >
+          {myAvatarUri ? (
+            <Image
+              source={{ uri: myAvatarUri }}
+              style={styles.myProfileAvatar}
+            />
+          ) : (
+            <View style={styles.myProfileAvatar} />
+          )}
+          <Text style={styles.myProfileName}>{myName}</Text>
+        </Pressable>
 
         {/* 구분선 */}
         <View style={styles.divider} />
 
-        {/* 친구 수 */}
-        <View style={styles.friendCountRow}>
+        {/* 친구 수: 한 줄에 "친구 수 0명" */}
+        <View style={[styles.friendCountRow, localStyles.friendCountRowInline]}>
           <Text style={styles.friendCountLabel}>친구 수</Text>
-          <Text style={styles.friendCountValue}>{friends.length}</Text>
+          <Text style={styles.friendCountValue}>{friends.length}명</Text>
+        </View>
+
+        {/* 필터 탭: 전체 / 즐겨찾기 / + */}
+        <View style={localStyles.friendFilterRow}>
+          <Pressable
+            style={[
+              localStyles.friendFilterTab,
+              filterTab === "ALL" && localStyles.friendFilterTabActive,
+            ]}
+            onPress={() => {
+              setFilterTab("ALL");
+              setSelectedGroupName(null);
+            }}
+          >
+            <Text
+              style={[
+                localStyles.friendFilterTabText,
+                filterTab === "ALL" && localStyles.friendFilterTabTextActive,
+              ]}
+            >
+              전체
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              localStyles.friendFilterTab,
+              filterTab === "FAVORITE" && localStyles.friendFilterTabActive,
+            ]}
+            onPress={() => {
+              setFilterTab("FAVORITE");
+              setSelectedGroupName(null);
+            }}
+          >
+            <Text
+              style={[
+                localStyles.friendFilterTabText,
+                filterTab === "FAVORITE" &&
+                  localStyles.friendFilterTabTextActive,
+              ]}
+            >
+              즐겨찾기
+            </Text>
+          </Pressable>
+
+          {/* + : 그룹 관리 모달 열기 */}
+          <Pressable
+            style={localStyles.friendFilterPlusTab}
+            onPress={() => setGroupModalVisible(true)}
+          >
+            <Ionicons name="add" size={16} color="#7B61FF" />
+          </Pressable>
         </View>
 
         {/* 친구 리스트 */}
         <FlatList
-          data={friends}
+          data={filteredFriends}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.friendList}
           renderItem={({ item }) => (
-            // 🔹 친구 항목 길게 누르면 삭제 알럿
             <Pressable
               style={styles.friendRow}
               onLongPress={() => handleDeleteFriend(item.id)}
@@ -223,6 +430,7 @@ export default function FriendsScreen() {
         />
 
         {/* 🔻 친구 추가 모달 */}
+        {/* (이 아래 모달 부분은 그대로) */}
         <Modal
           visible={addVisible}
           transparent
@@ -272,22 +480,20 @@ export default function FriendsScreen() {
                     </Pressable>
                   </View>
 
-                  {/* 입력창 */}
+                  {/* 입력 */}
                   <View style={modalStyles.inputWrap}>
                     <TextInput
                       style={modalStyles.input}
                       placeholder={
                         addType === "PHONE"
-                          ? "전화번호를 입력하세요 (숫자만)"
-                          : "ZzapID를 입력하세요"
+                          ? "전화번호 입력 (숫자만)"
+                          : "ZzapID 입력"
                       }
                       value={identifier}
-                      onChangeText={(text) => {
-                        if (addType === "PHONE") {
-                          setIdentifier(formatPhoneNumber(text)); // 화면에는 하이픈 포함
-                        } else {
-                          setIdentifier(text);
-                        }
+                      onChangeText={(t) => {
+                        if (addType === "PHONE")
+                          setIdentifier(formatPhoneNumber(t));
+                        else setIdentifier(t);
                       }}
                       keyboardType={
                         addType === "PHONE" ? "number-pad" : "default"
@@ -328,7 +534,263 @@ export default function FriendsScreen() {
             </View>
           </TouchableWithoutFeedback>
         </Modal>
+
+        {/* 🔻 그룹 관리 모달 (+ 버튼) */}
+        <Modal
+          visible={groupModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setGroupModalVisible(false)}
+        >
+          <View style={localStyles.groupModalContainer}>
+            <View style={localStyles.groupModalBox}>
+              <Text style={localStyles.groupModalTitle}>그룹 관리</Text>
+
+              {/* 기존 그룹 선택 (있으면) */}
+              {groups.length > 0 && (
+                <>
+                  <Text style={localStyles.groupSectionTitle}>그룹 선택</Text>
+                  {groups.map((g) => (
+                    <Pressable
+                      key={g.name}
+                      style={localStyles.groupItem}
+                      onPress={() => {
+                        setSelectedGroupName(g.name);
+                        setFilterTab("GROUP");
+                        setGroupModalVisible(false);
+                      }}
+                    >
+                      <Text style={localStyles.groupItemText}>{g.name}</Text>
+                    </Pressable>
+                  ))}
+                  <View style={localStyles.groupDivider} />
+                </>
+              )}
+
+              {/* 새 그룹 만들기 */}
+              <Text style={localStyles.groupSectionTitle}>새 그룹 만들기</Text>
+              <TextInput
+                style={localStyles.groupNameInput}
+                placeholder="그룹 이름"
+                value={newGroupName}
+                onChangeText={setNewGroupName}
+              />
+              <Text style={localStyles.groupHintText}>
+                그룹에 넣을 친구를 선택해 주세요.
+              </Text>
+
+              <View style={localStyles.groupFriendList}>
+                {friends.length === 0 ? (
+                  <Text style={localStyles.groupHintText}>
+                    추가된 친구가 없습니다.
+                  </Text>
+                ) : (
+                  friends.map((f) => {
+                    const selected = groupSelectIds.includes(f.id);
+                    return (
+                      <Pressable
+                        key={f.id}
+                        style={[
+                          localStyles.groupFriendItem,
+                          selected && localStyles.groupFriendItemSelected,
+                        ]}
+                        onPress={() => {
+                          setGroupSelectIds((prev) =>
+                            prev.includes(f.id)
+                              ? prev.filter((id) => id !== f.id)
+                              : [...prev, f.id]
+                          );
+                        }}
+                      >
+                        <Text
+                          style={[
+                            localStyles.groupFriendItemText,
+                            selected && localStyles.groupFriendItemTextSelected,
+                          ]}
+                        >
+                          {f.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })
+                )}
+              </View>
+
+              <Pressable
+                style={[
+                  localStyles.groupCreateButton,
+                  (!newGroupName.trim() || groupSelectIds.length === 0) && {
+                    opacity: 0.4,
+                  },
+                ]}
+                disabled={!newGroupName.trim() || groupSelectIds.length === 0}
+                onPress={handleCreateGroup}
+              >
+                <Text style={localStyles.groupCreateButtonText}>
+                  그룹 만들기
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={localStyles.groupModalClose}
+                onPress={() => {
+                  setGroupModalVisible(false);
+                  setNewGroupName("");
+                  setGroupSelectIds([]);
+                }}
+              >
+                <Text style={localStyles.groupModalCloseText}>닫기</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
       </View>
     </SafeAreaView>
   );
 }
+
+const PURPLE = "#9997FF";
+/* 🔸 이 파일 안에서만 쓰는 로컬 스타일 */
+const localStyles = StyleSheet.create({
+  friendCountRowInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+  },
+
+  friendFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    gap: 8,
+  },
+  friendFilterTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: PURPLE,
+    backgroundColor: "#FFFFFF",
+  },
+  friendFilterTabActive: {
+    backgroundColor: PURPLE,
+    borderColor: PURPLE,
+  },
+  friendFilterTabText: {
+    fontSize: 13,
+    color: PURPLE,
+    fontWeight: "500",
+  },
+  friendFilterTabTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+  },
+  friendFilterPlusTab: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  groupModalContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  groupModalBox: {
+    width: "80%",
+    maxHeight: "80%",
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    backgroundColor: "#fff",
+  },
+  groupModalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  groupSectionTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  groupItem: {
+    paddingVertical: 6,
+  },
+  groupItemText: {
+    fontSize: 14,
+  },
+  groupDivider: {
+    height: 1,
+    backgroundColor: "#EEE",
+    marginVertical: 8,
+  },
+
+  groupNameInput: {
+    borderWidth: 1,
+    borderColor: "#E0E0FF",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 14,
+  },
+  groupHintText: {
+    fontSize: 12,
+    color: "#888",
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  groupFriendList: {
+    maxHeight: 160,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  groupFriendItem: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  groupFriendItemSelected: {
+    backgroundColor: "#ECE8FF",
+  },
+  groupFriendItemText: {
+    fontSize: 13,
+    color: "#333",
+  },
+  groupFriendItemTextSelected: {
+    color: "#7B61FF",
+    fontWeight: "600",
+  },
+
+  groupCreateButton: {
+    marginTop: 4,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "#7B61FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupCreateButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  groupModalClose: {
+    marginTop: 10,
+    alignSelf: "flex-end",
+  },
+  groupModalCloseText: {
+    fontSize: 13,
+    color: "#7B61FF",
+  },
+});
