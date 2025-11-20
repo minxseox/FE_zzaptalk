@@ -24,6 +24,7 @@
     },
     "web": {
       "output": "static",
+      "publicPath": "/",
       "favicon": "./assets/images/icon.png",
       "meta": {
         "title": "zzaptalk"
@@ -41,6 +42,12 @@
           "dark": {
             "backgroundColor": "#000000"
           }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "프로필 사진과 배경화면 변경을 위해 사진에 접근합니다."
         }
       ],
       "expo-secure-store"
