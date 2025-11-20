@@ -31,9 +31,18 @@ import type { ChatMessageResponse } from "../../src/types/chat";
 import { loadTokenWithExpiry } from "../../src/lib/authStorage";
 import { parseJwt } from "../../src/lib/jwt";
 
-// --- (선택) 소켓 모듈 안전 로딩 ---
-let connectStomp: undefined | ((token: string) => Promise<void>);
-let disconnectStomp: undefined | (() => void);
+// 🛠️ [유틸] 두 날짜가 같은 날인지 비교
+function isSameDay(d1: string, d2: string) {
+  const date1 = new Date(d1);
+  const date2 = new Date(d2);
+  return (
+    date1.getFullYear() === date2.getFullYear() &&
+    date1.getMonth() === date2.getMonth() &&
+    date1.getDate() === date2.getDate()
+  );
+}
+
+// --- 소켓 모듈 로딩 (전송/구독용) ---
 let sendChatMessageRaw:
   | undefined
   | ((roomId: number, content: string) => Promise<any>)
@@ -44,8 +53,6 @@ let subscribeRoom:
 
 try {
   const mod = require("../../src/services/socket");
-  connectStomp = mod.connectStomp;
-  disconnectStomp = mod.disconnectStomp;
   sendChatMessageRaw = mod.sendChatMessage;
   subscribeRoom = mod.subscribeRoom;
 } catch {}
@@ -62,6 +69,7 @@ async function getMyId(): Promise<number | null> {
     return null;
   }
 }
+
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
   if (sendChatMessageRaw.length === 2) {
@@ -89,14 +97,13 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ✅ Zustand Store 사용 (useState 제거됨)
+  // ✅ Store 사용
   const messages = useChatStore((state) => state.messages);
   const setMessages = useChatStore((state) => state.setMessages);
   const addMessage = useChatStore((state) => state.addMessage);
 
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
-  const [token, setToken] = useState<string | null>(null);
 
   const flatRef = useRef<FlatList<ChatMessageResponse>>(null);
   const lastRedirectRef = useRef<Href | null>(null);
@@ -119,8 +126,6 @@ export default function ChatRoomScreen() {
 
   useEffect(() => {
     (async () => {
-      const saved = await loadTokenWithExpiry();
-      setToken(saved?.token || null);
       setMyId(await getMyId());
     })();
   }, []);
@@ -139,7 +144,6 @@ export default function ChatRoomScreen() {
         (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
       );
 
-      // ✅ Store 업데이트
       setMessages(sorted);
       scrollToBottom();
     } catch (e: any) {
@@ -162,18 +166,12 @@ export default function ChatRoomScreen() {
       const sorted = [...data].sort(
         (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
       );
-      // ✅ Store 업데이트
       setMessages(sorted);
       scrollToBottom();
     } catch (e: any) {
       const st = e?.status ?? e?.response?.status;
       if (st === 401) {
         redirectOnce("/login" as Href);
-        return;
-      }
-      if (st === 403) {
-        Alert.alert("접근 불가", "이 방의 메시지를 볼 권한이 없어요.");
-        redirectOnce("/chatlist" as Href);
         return;
       }
       Alert.alert("동기화 실패", e?.message || "메시지를 갱신하지 못했어요.");
@@ -190,28 +188,17 @@ export default function ChatRoomScreen() {
   if (!navReady) return null;
   if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
 
-  // 소켓 구독
+  // ✅ 소켓 구독 (Global Socket 활용)
   useEffect(() => {
-    if (!token || !connectStomp) return;
-    let cleanup = () => {};
-    (async () => {
-      try {
-        await connectStomp!(token);
-        if (subscribeRoom) {
-          const unsub = subscribeRoom(roomId, (m) => {
-            // ✅ Store에 소켓 메시지 추가
-            addMessage(m);
-            scrollToBottom();
-          });
-          cleanup = () => unsub?.();
-        }
-      } catch {}
-    })();
+    if (!subscribeRoom) return;
+    const unsub = subscribeRoom(roomId, (m) => {
+      addMessage(m);
+      scrollToBottom();
+    });
     return () => {
-      cleanup?.();
-      disconnectStomp?.();
+      unsub?.();
     };
-  }, [roomId, token, scrollToBottom, addMessage]);
+  }, [roomId, addMessage, scrollToBottom]);
 
   // 메시지 전송
   const onSend = useCallback(async () => {
@@ -220,7 +207,7 @@ export default function ChatRoomScreen() {
 
     const nowIso = new Date().toISOString();
     const optimistic: ChatMessageResponse = {
-      messageId: Date.now(), // 임시 ID
+      messageId: Date.now(),
       roomId,
       senderId: myId,
       content: t,
@@ -230,7 +217,6 @@ export default function ChatRoomScreen() {
       type: "TEXT",
     };
 
-    // ✅ Optimistic Update (Store 즉시 반영)
     addMessage(optimistic);
     setText("");
     scrollToBottom();
@@ -239,10 +225,8 @@ export default function ChatRoomScreen() {
       if (sendChatMessageRaw) {
         await sendCompat(roomId, myId, t);
       }
-      // 안정성을 위해 서버와 동기화
       await syncMessages();
     } catch {
-      // ✅ 실패 시 롤백: 현재 스토어 상태에서 임시 메시지 제거
       const currentMsgs = useChatStore.getState().messages;
       setMessages(
         currentMsgs.filter((m) => m.messageId !== optimistic.messageId)
@@ -259,9 +243,30 @@ export default function ChatRoomScreen() {
     setMessages,
   ]);
 
+  // 🎨 Render Item (날짜 구분선 로직 포함)
   const renderItem = useCallback(
-    ({ item }: { item: ChatMessageResponse }) => {
+    ({ item, index }: { item: ChatMessageResponse; index: number }) => {
       const mine = myId != null && item.senderId === myId;
+
+      // --- 날짜 구분선 판단 ---
+      let showDateSeparator = false;
+      if (index === 0) {
+        showDateSeparator = true;
+      } else {
+        const prevMsg = messages[index - 1];
+        // 이전 메시지와 날짜가 다르면 구분선 표시
+        if (prevMsg && !isSameDay(item.createdAt, prevMsg.createdAt)) {
+          showDateSeparator = true;
+        }
+      }
+
+      // 날짜 포맷 (예: 2025년 11월 20일 목요일)
+      const dateText = new Date(item.createdAt).toLocaleDateString("ko-KR", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        weekday: "long",
+      });
 
       const timeLabel = new Date(item.createdAt).toLocaleTimeString([], {
         hour: "2-digit",
@@ -269,42 +274,55 @@ export default function ChatRoomScreen() {
       });
 
       return (
-        <View
-          style={[styles.msgRow, mine ? styles.msgRowMine : styles.msgRowOther]}
-        >
-          {!mine && <View style={{ width: 34, marginRight: 8 }} />}
-
-          <View style={styles.bubbleLine}>
-            {mine && (
-              <Text style={[styles.timeBeside, styles.timeBesideMine]}>
-                {timeLabel}
-              </Text>
-            )}
-
-            <View
-              style={[
-                styles.bubble,
-                mine ? styles.bubbleMine : styles.bubbleOther,
-              ]}
-            >
-              {!mine && item.senderName ? (
-                <Text style={styles.senderName}>{item.senderName}</Text>
-              ) : null}
-              <Text style={mine ? styles.msgTextMine : styles.msgTextOther}>
-                {item.content}
-              </Text>
+        <View>
+          {/* 📅 날짜 구분선 렌더링 */}
+          {showDateSeparator && (
+            <View style={styles.dateSeparator}>
+              <Text style={styles.dateSeparatorText}>{dateText}</Text>
             </View>
+          )}
 
-            {!mine && (
-              <Text style={[styles.timeBeside, styles.timeBesideOther]}>
-                {timeLabel}
-              </Text>
-            )}
+          {/* 메시지 말풍선 */}
+          <View
+            style={[
+              styles.msgRow,
+              mine ? styles.msgRowMine : styles.msgRowOther,
+            ]}
+          >
+            {!mine && <View style={{ width: 34, marginRight: 8 }} />}
+
+            <View style={styles.bubbleLine}>
+              {mine && (
+                <Text style={[styles.timeBeside, styles.timeBesideMine]}>
+                  {timeLabel}
+                </Text>
+              )}
+
+              <View
+                style={[
+                  styles.bubble,
+                  mine ? styles.bubbleMine : styles.bubbleOther,
+                ]}
+              >
+                {!mine && item.senderName ? (
+                  <Text style={styles.senderName}>{item.senderName}</Text>
+                ) : null}
+                <Text style={mine ? styles.msgTextMine : styles.msgTextOther}>
+                  {item.content}
+                </Text>
+              </View>
+
+              {!mine && (
+                <Text style={[styles.timeBeside, styles.timeBesideOther]}>
+                  {timeLabel}
+                </Text>
+              )}
+            </View>
           </View>
         </View>
       );
     },
-    [myId]
+    [myId, messages] // messages가 바뀌면 인덱스 비교 다시 해야 함
   );
 
   return (
@@ -342,7 +360,6 @@ export default function ChatRoomScreen() {
           <ActivityIndicator size="large" />
         </View>
       ) : (
-        // ✅ FlatList 데이터 소스를 Store의 messages로 연결
         <FlatList
           ref={flatRef}
           data={messages}
@@ -416,6 +433,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     color: "#111",
+  },
+
+  // --- Date Separator ---
+  dateSeparator: {
+    alignItems: "center",
+    marginVertical: 16,
+  },
+  dateSeparatorText: {
+    fontSize: 11,
+    color: "#555",
+    backgroundColor: "rgba(0,0,0,0.06)",
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    overflow: "hidden",
   },
 
   // --- Message Row & Bubble ---

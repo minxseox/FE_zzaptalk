@@ -1,3 +1,4 @@
+// app/_layout.tsx
 import {
   Stack,
   usePathname,
@@ -6,10 +7,15 @@ import {
 } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Platform, View, ActivityIndicator } from "react-native";
-import { restoreSession, onAuthChange } from "../src/lib/authSession";
 import { useFonts } from "expo-font";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import "../global-icons.css";
+
+// ✅ 기존 라이브러리 Import
+import { restoreSession, onAuthChange } from "../src/lib/authSession";
+// ✅ 추가: 토큰 가져오기 및 소켓 함수 Import
+import { loadTokenWithExpiry } from "../src/lib/authStorage";
+import { connectStomp, disconnectStomp } from "../src/services/socket";
 
 const PUBLIC = new Set<string>(["/login", "/signup"]);
 const norm = (p: string) => {
@@ -34,6 +40,7 @@ export default function RootLayout() {
     isWeb ? {} : { ...Ionicons.font, ...MaterialIcons.font }
   );
 
+  // 웹 포커스 처리
   useEffect(() => {
     if (Platform.OS !== "web") return;
     try {
@@ -41,16 +48,17 @@ export default function RootLayout() {
     } catch {}
   }, [pathname]);
 
+  // 1️⃣ 초기 세션 복구 & 로그인 상태 감지
   useEffect(() => {
     let alive = true;
     (async () => {
-      // DEV_BYPASS_AUTH 켜져 있어도 그냥 세션 복구 시도는 해도 되고,
-      // 귀찮으면 이 블록도 조건으로 감싸도 됨.
       const ok = await restoreSession();
       if (!alive) return;
       setLoggedIn(!!ok);
       setReady(true);
     })();
+
+    // 로그인 상태가 바뀌면(로그인/로그아웃) loggedIn 업데이트
     const off = onAuthChange((v) => setLoggedIn(v));
     return () => {
       alive = false;
@@ -58,10 +66,34 @@ export default function RootLayout() {
     };
   }, []);
 
+  // 2️⃣ ✅ [신규] 전역 소켓 연결 관리 (로그인 상태에 따라)
+  useEffect(() => {
+    if (!ready) return;
+
+    const manageSocket = async () => {
+      if (loggedIn) {
+        // 로그인 상태: 토큰 꺼내서 소켓 연결
+        const data = await loadTokenWithExpiry();
+        if (data?.token) {
+          console.log("[Layout] 전역 소켓 연결 시도...");
+          connectStomp(data.token).catch((e) =>
+            console.warn("[Layout] 소켓 연결 실패:", e)
+          );
+        }
+      } else {
+        // 로그아웃 상태: 소켓 끊기
+        console.log("[Layout] 전역 소켓 해제");
+        disconnectStomp();
+      }
+    };
+
+    manageSocket();
+  }, [loggedIn, ready]); // loggedIn이 바뀔 때마다 실행
+
+  // 3️⃣ 라우팅 방어 (리다이렉트)
   useEffect(() => {
     if (!rootNav?.key || !ready) return;
 
-    // ✅ 개발용: 인증 우회 시 리다이렉트 로직 자체를 막음
     if (DEV_BYPASS_AUTH) {
       return;
     }

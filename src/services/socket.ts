@@ -2,6 +2,8 @@
 import { Client, IMessage, StompHeaders } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import type { ChatMessageResponse, MessageType } from "../types/chat";
+// ✅ 스토어 임포트 추가
+import { useSocketStore } from "../store/socketStore";
 
 // .env 예) EXPO_PUBLIC_WS_BASE=https://api.zzaptalk.com/ws-stomp
 const WS_BASE = (
@@ -74,20 +76,24 @@ export function connectStomp(token: string): Promise<void> {
       connectHeaders: {
         Authorization: `Bearer ${token}`,
       },
-      // 디버그 보고 싶으면 아래 주석 해제
-      // debug: (str) => console.log("[STOMP Debug]", str),
 
       onConnect: () => {
-        console.log("✅ STOMP Connected!");
+        console.log("✅ STOMP Connected! (Global)");
+        // ✅ 전역 상태 업데이트: 연결됨
+        useSocketStore.getState().setConnected(true);
         resolve();
       },
       onStompError: (frame) => {
         console.error("❌ STOMP Error", frame.headers["message"]);
+        // ✅ 전역 상태 업데이트: 끊김
+        useSocketStore.getState().setConnected(false);
         reject(new Error(frame.headers["message"]));
         connectionPromise = null; // 에러 나면 초기화
       },
       onWebSocketClose: () => {
         console.log("🔌 WebSocket Closed");
+        // ✅ 전역 상태 업데이트: 끊김
+        useSocketStore.getState().setConnected(false);
         connectionPromise = null; // 닫히면 초기화
       },
     });
@@ -131,6 +137,8 @@ export function disconnectStomp() {
     client.deactivate();
     client = null;
     connectionPromise = null;
+    // ✅ 전역 상태 업데이트: 끊김
+    useSocketStore.getState().setConnected(false);
   }
 }
 
