@@ -12,6 +12,9 @@ import {
   Text,
   TextInput,
   View,
+  Modal,
+  Image,
+  TouchableWithoutFeedback,
 } from "react-native";
 import {
   Redirect,
@@ -22,8 +25,9 @@ import {
 } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-// ✅ Zustand Store Import
+// ✅ Zustand Store
 import { useChatStore } from "../../src/store/chatStore";
+import { useChatListStore } from "../../src/store/chatListStore";
 
 import { getChatMessages, getChatRoomList } from "../../src/services/chat";
 import type { ChatMessageResponse } from "../../src/types/chat";
@@ -31,7 +35,10 @@ import type { ChatMessageResponse } from "../../src/types/chat";
 import { loadTokenWithExpiry } from "../../src/lib/authStorage";
 import { parseJwt } from "../../src/lib/jwt";
 
-// 🛠️ [유틸] 두 날짜가 같은 날인지 비교
+// ✅ [API] 친구 프로필 조회 (GET /api/v1/friends/{friendId}/profile)
+import { fetchFriendProfile } from "../../src/services/profile";
+
+// 날짜 비교 유틸
 function isSameDay(d1: string, d2: string) {
   const date1 = new Date(d1);
   const date2 = new Date(d2);
@@ -42,22 +49,16 @@ function isSameDay(d1: string, d2: string) {
   );
 }
 
-// --- 소켓 모듈 로딩 (전송/구독용) ---
-let sendChatMessageRaw:
-  | undefined
-  | ((roomId: number, content: string) => Promise<any>)
-  | ((roomId: number, senderId: number, content: string) => Promise<any>);
-let subscribeRoom:
-  | undefined
-  | ((roomId: number, cb: (m: ChatMessageResponse) => void) => () => void);
-
+// 소켓 모듈 로딩 (안전 처리)
+let sendChatMessageRaw: any;
+let subscribeRoom: any;
 try {
   const mod = require("../../src/services/socket");
   sendChatMessageRaw = mod.sendChatMessage;
   subscribeRoom = mod.subscribeRoom;
 } catch {}
 
-// --- 유틸 ---
+// 내 ID 가져오기
 async function getMyId(): Promise<number | null> {
   try {
     const saved = await loadTokenWithExpiry();
@@ -70,17 +71,13 @@ async function getMyId(): Promise<number | null> {
   }
 }
 
+// 전송 호환성 함수
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
   if (sendChatMessageRaw.length === 2) {
-    return (sendChatMessageRaw as (r: number, c: string) => Promise<any>)(
-      roomId,
-      content
-    );
+    return sendChatMessageRaw(roomId, content);
   }
-  return (
-    sendChatMessageRaw as (r: number, s: number, c: string) => Promise<any>
-  )(roomId, myId, content);
+  return sendChatMessageRaw(roomId, myId, content);
 }
 
 export default function ChatRoomScreen() {
@@ -97,16 +94,26 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ✅ Store 사용
+  // Store
   const messages = useChatStore((state) => state.messages);
   const setMessages = useChatStore((state) => state.setMessages);
   const addMessage = useChatStore((state) => state.addMessage);
+
+  const updateRoomLastMessage = useChatListStore(
+    (state) => state.updateRoomLastMessage
+  );
+  const resetUnreadCount = useChatListStore((state) => state.resetUnreadCount);
 
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
 
   const flatRef = useRef<FlatList<ChatMessageResponse>>(null);
   const lastRedirectRef = useRef<Href | null>(null);
+
+  // ✅ [추가] 친구 프로필 모달 상태
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<any>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   const redirectOnce = useCallback(
     (to: Href) => {
@@ -130,13 +137,13 @@ export default function ChatRoomScreen() {
     })();
   }, []);
 
+  // 채팅방 초기 로딩
   const initialLoad = useCallback(async () => {
     try {
       try {
         await getChatRoomList();
       } catch (e: any) {
-        const st = e?.status ?? e?.response?.status;
-        if (st === 401) return redirectOnce("/login" as Href);
+        if (e?.status === 401) return redirectOnce("/login" as Href);
       }
 
       const data = await getChatMessages(roomId);
@@ -147,12 +154,7 @@ export default function ChatRoomScreen() {
       setMessages(sorted);
       scrollToBottom();
     } catch (e: any) {
-      const st = e?.status ?? e?.response?.status;
-      if (st === 401) return redirectOnce("/login" as Href);
-      if (st === 403) {
-        Alert.alert("접근 불가", "이 방의 메시지를 볼 권한이 없어요.");
-        return redirectOnce("/chatlist" as Href);
-      }
+      if (e?.status === 401) return redirectOnce("/login" as Href);
       Alert.alert("오류", e?.message || "불러오기 실패");
     } finally {
       setInitialLoading(false);
@@ -169,12 +171,7 @@ export default function ChatRoomScreen() {
       setMessages(sorted);
       scrollToBottom();
     } catch (e: any) {
-      const st = e?.status ?? e?.response?.status;
-      if (st === 401) {
-        redirectOnce("/login" as Href);
-        return;
-      }
-      Alert.alert("동기화 실패", e?.message || "메시지를 갱신하지 못했어요.");
+      if (e?.status === 401) return redirectOnce("/login" as Href);
     } finally {
       setSyncing(false);
     }
@@ -183,24 +180,25 @@ export default function ChatRoomScreen() {
   useEffect(() => {
     if (!navReady) return;
     initialLoad();
-  }, [navReady, initialLoad]);
+    resetUnreadCount(roomId);
+  }, [navReady, initialLoad, roomId, resetUnreadCount]);
 
   if (!navReady) return null;
   if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
 
-  // ✅ 소켓 구독 (Global Socket 활용)
+  // 소켓 구독
   useEffect(() => {
     if (!subscribeRoom) return;
-    const unsub = subscribeRoom(roomId, (m) => {
+    const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
       addMessage(m);
       scrollToBottom();
+      updateRoomLastMessage(roomId, m.content, m.createdAt, true);
     });
     return () => {
       unsub?.();
     };
-  }, [roomId, addMessage, scrollToBottom]);
+  }, [roomId, addMessage, scrollToBottom, updateRoomLastMessage]);
 
-  // 메시지 전송
   const onSend = useCallback(async () => {
     const t = text.trim();
     if (!t || !myId) return;
@@ -218,6 +216,7 @@ export default function ChatRoomScreen() {
     };
 
     addMessage(optimistic);
+    updateRoomLastMessage(roomId, t, nowIso, true);
     setText("");
     scrollToBottom();
 
@@ -227,10 +226,6 @@ export default function ChatRoomScreen() {
       }
       await syncMessages();
     } catch {
-      const currentMsgs = useChatStore.getState().messages;
-      setMessages(
-        currentMsgs.filter((m) => m.messageId !== optimistic.messageId)
-      );
       Alert.alert("전송 실패", "메시지를 보낼 수 없어요.");
     }
   }, [
@@ -240,27 +235,42 @@ export default function ChatRoomScreen() {
     scrollToBottom,
     syncMessages,
     addMessage,
-    setMessages,
+    updateRoomLastMessage,
   ]);
 
-  // 🎨 Render Item (날짜 구분선 로직 포함)
+  // ✅ [API] 친구 프로필 클릭 핸들러
+  const handlePressAvatar = async (senderId: number) => {
+    if (senderId === myId) return; // 내 프로필은 무시 (또는 내 프로필로 이동)
+
+    setProfileLoading(true);
+    setProfileModalVisible(true);
+    try {
+      // GET /api/v1/friends/{friendId}/profile
+      const data = await fetchFriendProfile(senderId);
+      setSelectedProfile(data);
+    } catch (e) {
+      console.error(e);
+      Alert.alert("알림", "프로필 정보를 불러올 수 없습니다.");
+      setProfileModalVisible(false);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  // 렌더 아이템
   const renderItem = useCallback(
     ({ item, index }: { item: ChatMessageResponse; index: number }) => {
       const mine = myId != null && item.senderId === myId;
 
-      // --- 날짜 구분선 판단 ---
       let showDateSeparator = false;
-      if (index === 0) {
-        showDateSeparator = true;
-      } else {
+      if (index === 0) showDateSeparator = true;
+      else {
         const prevMsg = messages[index - 1];
-        // 이전 메시지와 날짜가 다르면 구분선 표시
         if (prevMsg && !isSameDay(item.createdAt, prevMsg.createdAt)) {
           showDateSeparator = true;
         }
       }
 
-      // 날짜 포맷 (예: 2025년 11월 20일 목요일)
       const dateText = new Date(item.createdAt).toLocaleDateString("ko-KR", {
         year: "numeric",
         month: "long",
@@ -275,21 +285,33 @@ export default function ChatRoomScreen() {
 
       return (
         <View>
-          {/* 📅 날짜 구분선 렌더링 */}
           {showDateSeparator && (
             <View style={styles.dateSeparator}>
               <Text style={styles.dateSeparatorText}>{dateText}</Text>
             </View>
           )}
 
-          {/* 메시지 말풍선 */}
           <View
             style={[
               styles.msgRow,
               mine ? styles.msgRowMine : styles.msgRowOther,
             ]}
           >
-            {!mine && <View style={{ width: 34, marginRight: 8 }} />}
+            {!mine && (
+              // ✅ [수정] 상대방 아바타 영역 (클릭 시 프로필 조회)
+              <Pressable
+                style={styles.avatarContainer}
+                onPress={() => handlePressAvatar(item.senderId)}
+              >
+                {/* 실제 이미지가 있으면 Image, 없으면 아이콘 */}
+                {/* 메시지 객체에 profileUrl이 있다면 사용, 없으면 기본 아이콘 */}
+                <View style={styles.avatarPlaceholder}>
+                  <Text style={styles.avatarInitial}>
+                    {item.senderName?.charAt(0) ?? "?"}
+                  </Text>
+                </View>
+              </Pressable>
+            )}
 
             <View style={styles.bubbleLine}>
               {mine && (
@@ -305,6 +327,7 @@ export default function ChatRoomScreen() {
                 ]}
               >
                 {!mine && item.senderName ? (
+                  // 이름 클릭 시에도 프로필 조회 가능하게 할 수 있음
                   <Text style={styles.senderName}>{item.senderName}</Text>
                 ) : null}
                 <Text style={mine ? styles.msgTextMine : styles.msgTextOther}>
@@ -322,7 +345,7 @@ export default function ChatRoomScreen() {
         </View>
       );
     },
-    [myId, messages] // messages가 바뀌면 인덱스 비교 다시 해야 함
+    [myId, messages]
   );
 
   return (
@@ -331,18 +354,17 @@ export default function ChatRoomScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
     >
+      {/* 헤더 */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.headerBtn}>
           <Ionicons name="chevron-back" size={22} color="#111" />
         </Pressable>
-
         <Text style={styles.headerTitle}>{headerTitle}</Text>
-
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Pressable onPress={() => {}} style={styles.headerBtn}>
+          <Pressable style={styles.headerBtn}>
             <Ionicons name="search" size={20} color="#111" />
           </Pressable>
-          <Pressable onPress={() => {}} style={styles.headerBtn}>
+          <Pressable style={styles.headerBtn}>
             <Ionicons
               name="settings-outline"
               size={20}
@@ -353,6 +375,7 @@ export default function ChatRoomScreen() {
         </View>
       </View>
 
+      {/* 채팅 목록 */}
       {initialLoading ? (
         <View
           style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
@@ -371,14 +394,14 @@ export default function ChatRoomScreen() {
         />
       )}
 
+      {/* 입력창 */}
       <View style={styles.inputBar}>
-        <Pressable style={styles.circleBtn} onPress={() => {}}>
+        <Pressable style={styles.circleBtn}>
           <Ionicons name="add" size={20} color="#444" />
         </Pressable>
-        <Pressable style={styles.circleBtn} onPress={() => {}}>
+        <Pressable style={styles.circleBtn}>
           <Ionicons name="happy-outline" size={20} color="#444" />
         </Pressable>
-
         <View style={styles.inputWrap}>
           <TextInput
             placeholder="메세지 입력"
@@ -400,6 +423,94 @@ export default function ChatRoomScreen() {
           </Pressable>
         </View>
       </View>
+
+      {/* ✅ [추가] 친구 프로필 모달 */}
+      <Modal
+        visible={profileModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setProfileModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setProfileModalVisible(false)}>
+          <View style={modalStyles.overlay}>
+            <TouchableWithoutFeedback>
+              <View style={modalStyles.card}>
+                {profileLoading ? (
+                  <ActivityIndicator size="large" color="#7C73FF" />
+                ) : (
+                  selectedProfile && (
+                    <>
+                      {/* 배경 */}
+                      <View style={modalStyles.bgContainer}>
+                        {selectedProfile.backgroundPhotoUrl ? (
+                          <Image
+                            source={{ uri: selectedProfile.backgroundPhotoUrl }}
+                            style={modalStyles.bgImage}
+                          />
+                        ) : (
+                          <View
+                            style={[
+                              modalStyles.bgImage,
+                              { backgroundColor: "#eee" },
+                            ]}
+                          />
+                        )}
+                        <Pressable
+                          style={modalStyles.closeBtn}
+                          onPress={() => setProfileModalVisible(false)}
+                        >
+                          <Ionicons name="close" size={20} color="#333" />
+                        </Pressable>
+                      </View>
+
+                      {/* 프로필 정보 */}
+                      <View style={modalStyles.infoContainer}>
+                        <View style={modalStyles.avatarContainer}>
+                          {selectedProfile.profilePhotoUrl ? (
+                            <Image
+                              source={{ uri: selectedProfile.profilePhotoUrl }}
+                              style={modalStyles.avatar}
+                            />
+                          ) : (
+                            <View
+                              style={[
+                                modalStyles.avatar,
+                                {
+                                  backgroundColor: "#ccc",
+                                  justifyContent: "center",
+                                  alignItems: "center",
+                                },
+                              ]}
+                            >
+                              <Ionicons name="person" size={40} color="#fff" />
+                            </View>
+                          )}
+                        </View>
+                        <Text style={modalStyles.name}>
+                          {selectedProfile.nickname ||
+                            selectedProfile.name ||
+                            "이름 없음"}
+                        </Text>
+                        <Text style={modalStyles.status}>
+                          {selectedProfile.statusMessage || ""}
+                        </Text>
+                      </View>
+
+                      {/* 하단 버튼 (예: 1:1 채팅, 통화 등) */}
+                      <View style={modalStyles.actionRow}>
+                        <View style={modalStyles.actionItem}>
+                          <Ionicons name="chatbubble" size={20} color="#fff" />
+                          <Text style={modalStyles.actionText}>1:1 채팅</Text>
+                        </View>
+                      </View>
+                    </>
+                  )
+                )}
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -407,7 +518,7 @@ export default function ChatRoomScreen() {
 const PURPLE = "#9997FF";
 
 const styles = StyleSheet.create({
-  // --- Header ---
+  // 기존 스타일 유지
   header: {
     height: 56,
     paddingHorizontal: 12,
@@ -429,17 +540,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111",
-  },
-
-  // --- Date Separator ---
-  dateSeparator: {
-    alignItems: "center",
-    marginVertical: 16,
-  },
+  headerTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
+  dateSeparator: { alignItems: "center", marginVertical: 16 },
   dateSeparatorText: {
     fontSize: 11,
     color: "#555",
@@ -449,18 +551,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: "hidden",
   },
-
-  // --- Message Row & Bubble ---
   msgRow: { flexDirection: "row", marginVertical: 6, paddingHorizontal: 6 },
   msgRowMine: { justifyContent: "flex-end" },
   msgRowOther: { justifyContent: "flex-start" },
 
-  bubbleLine: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    maxWidth: "88%",
+  // ✅ [수정] 아바타 스타일
+  avatarContainer: { marginRight: 8, alignSelf: "flex-start" },
+  avatarPlaceholder: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#EFEFEF",
+    alignItems: "center",
+    justifyContent: "center",
   },
+  avatarInitial: { fontSize: 14, color: "#666", fontWeight: "600" },
 
+  bubbleLine: { flexDirection: "row", alignItems: "flex-end", maxWidth: "88%" },
   bubble: {
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -469,29 +576,12 @@ const styles = StyleSheet.create({
   },
   bubbleMine: { backgroundColor: PURPLE, borderBottomRightRadius: 6 },
   bubbleOther: { backgroundColor: "#EFEFEF", borderBottomLeftRadius: 6 },
-
   senderName: { fontSize: 12, color: "#666", marginBottom: 4 },
-
   msgTextMine: { color: "#fff", fontSize: 15, lineHeight: 21 },
   msgTextOther: { color: "#111", fontSize: 15, lineHeight: 21 },
-
-  timeBeside: {
-    fontSize: 11,
-    color: "#8E8E8E",
-    alignSelf: "flex-end",
-  },
-  timeBesideMine: {
-    textAlign: "left",
-    marginRight: 4,
-    marginLeft: 0,
-  },
-  timeBesideOther: {
-    textAlign: "right",
-    marginLeft: 4,
-    marginRight: 0,
-  },
-
-  // --- Input Bar ---
+  timeBeside: { fontSize: 11, color: "#8E8E8E", alignSelf: "flex-end" },
+  timeBesideMine: { textAlign: "left", marginRight: 4, marginLeft: 0 },
+  timeBesideOther: { textAlign: "right", marginLeft: 4, marginRight: 0 },
   inputBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -538,4 +628,67 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+});
+
+// ✅ [추가] 모달용 스타일
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  card: {
+    width: 300,
+    height: 420,
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    overflow: "hidden",
+  },
+  bgContainer: { height: 120, width: "100%", position: "relative" },
+  bgImage: { width: "100%", height: "100%" },
+  closeBtn: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    backgroundColor: "rgba(255,255,255,0.7)",
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  infoContainer: { flex: 1, alignItems: "center", marginTop: -40 },
+  avatarContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    padding: 3,
+    backgroundColor: "#fff",
+    marginBottom: 10,
+    elevation: 2,
+  },
+  avatar: { width: "100%", height: "100%", borderRadius: 40 },
+  name: { fontSize: 18, fontWeight: "700", color: "#111", marginBottom: 4 },
+  status: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    paddingHorizontal: 20,
+  },
+  actionRow: {
+    height: 60,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+    flexDirection: "row",
+  },
+  actionItem: {
+    flex: 1,
+    backgroundColor: PURPLE,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  actionText: { color: "#fff", fontWeight: "600", fontSize: 15 },
 });

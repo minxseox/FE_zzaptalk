@@ -1,4 +1,3 @@
-// src/styles/chat/ChatList.module.ts
 import { StyleSheet } from "react-native";
 
 const PURPLE = "#7C73FF";
@@ -21,20 +20,37 @@ export default StyleSheet.create({
     borderTopColor: PURPLE, // 맨 위 보라 라인
     borderBottomWidth: 1,
     borderBottomColor: "#E8E8F0",
+    position: "relative", // ✅ [추가] 자식 요소(타이틀)의 절대 위치 기준점
   },
+
+  // ✅ [추가] 타이틀을 감싸서 정중앙에 배치할 컨테이너
+  headerTitleWrapper: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: -1, // 버튼들보다 뒤에 위치하여 터치 방해 방지
+  },
+
   headerLeft: {
     width: 40,
   },
+
   headerTitle: {
-    flex: 1,
-    textAlign: "center",
+    // flex: 1, // [삭제] 절대 위치 래퍼가 중앙 정렬하므로 제거
+    // textAlign: "center", // [삭제] 래퍼가 정렬함
     fontSize: 16,
     fontWeight: "700",
     color: "#111111",
   },
+
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
+    zIndex: 10,
   },
   headerIconBtn: {
     width: 32,
@@ -97,7 +113,7 @@ export default StyleSheet.create({
   },
 
   /* ============================
-   *    채팅방 생성 바텀시트
+   * 채팅방 생성 바텀시트
    * ============================ */
 
   sheetBackdrop: {

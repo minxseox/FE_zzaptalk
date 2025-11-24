@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 
 import styles from "../../src/styles/profile/Profile.module";
+// ✅ [API] 본인 프로필 조회 (GET /api/v1/users/profile)
 import { fetchMyProfile } from "../../src/services/profile";
 
 export default function ProfileScreen() {
@@ -17,20 +18,20 @@ export default function ProfileScreen() {
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 🔹 1) 처음 마운트될 때 서버에서 내 프로필 가져오기
+  // 🔹 1) 서버에서 내 프로필 가져오기 (GET)
   useEffect(() => {
     const load = async () => {
       try {
         const data = await fetchMyProfile();
 
-        // UI에서는 nickname을 표시 이름으로 사용
-        setName(data.nickname || data.name || "본인 이름");
-        setStatus(data.statusMessage || "상태 메시지");
+        // API 응답 매핑
+        setName(data.nickname || data.name || "이름 없음");
+        setStatus(data.statusMessage || "");
         setAvatarUri(data.profilePhotoUrl || null);
         setBackgroundUri(data.backgroundPhotoUrl || null);
       } catch (e) {
         console.error("내 프로필 조회 실패:", e);
-        Alert.alert("프로필 불러오기 실패", "다시 시도해 주세요.");
+        Alert.alert("오류", "프로필 정보를 불러오지 못했습니다.");
       } finally {
         setLoading(false);
       }
@@ -39,30 +40,44 @@ export default function ProfileScreen() {
     load();
   }, []);
 
-  // 🔹 2) 편집 화면에서 돌아올 때 넘겨준 params 가 있으면 그걸로 덮어쓰기
+  // 🔹 2) 편집 화면(PUT 완료 후)에서 돌아올 때 UI 업데이트
   useEffect(() => {
     if (params.name) setName(params.name as string);
     if (params.status) setStatus(params.status as string);
-    if (params.backgroundUri && params.backgroundUri !== "") {
-      setBackgroundUri(params.backgroundUri as string);
+    if (params.backgroundUri !== undefined) {
+      // 빈 문자열이면 이미지 삭제된 것으로 간주
+      setBackgroundUri(
+        params.backgroundUri === "" ? null : (params.backgroundUri as string)
+      );
     }
-    if (params.avatarUri && params.avatarUri !== "") {
-      setAvatarUri(params.avatarUri as string);
+    if (params.avatarUri !== undefined) {
+      setAvatarUri(
+        params.avatarUri === "" ? null : (params.avatarUri as string)
+      );
     }
-  }, [params.name, params.status, params.backgroundUri, params.avatarUri]);
+  }, [params]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.inner}>
         {/* 헤더 */}
         <View style={styles.header}>
-          <View style={styles.headerSideSpace} />
+          <View style={styles.headerSideSpace}>
+            {/* 뒤로가기 버튼이 필요하면 여기에 추가 */}
+            <Ionicons
+              name="chevron-back"
+              size={24}
+              color="#333"
+              onPress={() => router.back()}
+            />
+          </View>
           <Text style={styles.headerTitle}>프로필</Text>
 
           <View>
             <Text
               style={styles.editButton}
               onPress={() =>
+                // ✅ [API] 수정은 별도 페이지(PUT /api/v1/users/profile)에서 처리
                 router.push({
                   pathname: "/profile/edit",
                   params: {
@@ -79,12 +94,11 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* 로딩 중이면 가운데 인디케이터 */}
         {loading ? (
           <View
             style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
           >
-            <ActivityIndicator />
+            <ActivityIndicator size="large" color="#9997FF" />
           </View>
         ) : (
           <>
@@ -97,12 +111,12 @@ export default function ProfileScreen() {
                 />
               ) : (
                 <View style={styles.backgroundPlaceholder}>
-                  <Text style={styles.backgroundPlaceholderText}>배경사진</Text>
+                  {/* 배경이 없을 때 표시할 내용 */}
                 </View>
               )}
             </View>
 
-            {/* 아래 카드 */}
+            {/* 아래 카드 영역 */}
             <View style={styles.bottomCard}>
               <View style={styles.topDivider} />
 
@@ -116,7 +130,7 @@ export default function ProfileScreen() {
                     />
                   ) : (
                     <View style={styles.avatarPlaceholder}>
-                      <Ionicons name="person" size={40} color="#8a8a8a" />
+                      <Ionicons name="person" size={40} color="#fff" />
                     </View>
                   )}
                 </View>

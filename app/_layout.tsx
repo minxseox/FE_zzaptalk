@@ -11,9 +11,9 @@ import { useFonts } from "expo-font";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import "../global-icons.css";
 
-// ✅ 기존 라이브러리 Import
+// 기존 라이브러리 Import
 import { restoreSession, onAuthChange } from "../src/lib/authSession";
-// ✅ 추가: 토큰 가져오기 및 소켓 함수 Import
+//  추가: 토큰 가져오기 및 소켓 함수 Import
 import { loadTokenWithExpiry } from "../src/lib/authStorage";
 import { connectStomp, disconnectStomp } from "../src/services/socket";
 
@@ -24,7 +24,7 @@ const norm = (p: string) => {
 };
 
 // 🔥 서버 안 돌아갈 때만 true 로 두기 (나중에 꼭 false/삭제)
-const DEV_BYPASS_AUTH = true;
+const DEV_BYPASS_AUTH = false;
 
 export default function RootLayout() {
   const router = useRouter();

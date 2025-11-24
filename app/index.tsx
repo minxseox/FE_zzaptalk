@@ -3,7 +3,7 @@ import { Redirect } from "expo-router";
 import { View, ActivityIndicator } from "react-native";
 import { restoreSession, onAuthChange } from "../src/lib/authSession";
 
-export default function IndexGate() {
+export default function IndexGate() {        
   const [ready, setReady] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
 
