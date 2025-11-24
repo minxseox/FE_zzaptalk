@@ -27,7 +27,6 @@ export default function TabsLayout() {
         }}
       />
 
-      {/* 🔥 chat → chatlist 로 변경 */}
       <Tabs.Screen
         name="chatlist/index"
         options={{
