@@ -9,9 +9,9 @@ import {
   TextInput,
   View,
   Keyboard,
-  TouchableWithoutFeedback,
   StyleSheet,
-  Image, // 🔹 추가 (내 프로필 사진용)
+  Image,
+  TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,6 +19,7 @@ import { router } from "expo-router";
 
 import styles from "../../../src/styles/friends/Friends.module";
 import modalStyles from "../../../src/styles/friends/FriendAddModal.module";
+import { updateFriendSetting } from "../../../src/services/friends";
 
 import {
   getFriendList,
@@ -26,27 +27,25 @@ import {
   deleteFriend,
   createFriendGroup,
   addFriendToGroup,
+  deleteFriendGroup,
 } from "../../../src/services/friends";
-import { fetchMyProfile } from "../../../src/services/profile"; // 🔹 내 프로필 API
+import { fetchMyProfile } from "../../../src/services/profile";
 import type { FriendListResponseDto } from "../../../src/types/friends";
 
 type Friend = {
-  id: number; // 사용자 ID (userId)
-  friendshipId: number; // 친구 관계 ID (friendshipId)
+  id: number;
+  friendshipId: number;
   name: string;
   isFavorite?: boolean;
   groupName?: string | null;
 };
 
 type FriendGroup = {
+  id: number;
   name: string;
   friends: Friend[];
 };
 
-// 🔹 하드코딩 이름 제거 → 상태로 관리 (기본값 "사용자")
-// const MY_NAME = "김민서";
-
-/** 전화번호 자동 하이픈 포맷터 */
 function formatPhoneNumber(value: string) {
   const digits = value.replace(/\D/g, "");
   if (digits.length < 4) return digits;
@@ -57,15 +56,12 @@ function formatPhoneNumber(value: string) {
 }
 
 export default function FriendsScreen() {
-  // 🔹 내 프로필 (상단 영역)
-  const [myName, setMyName] = useState("사용자"); // 기본값: "사용자"
+  const [myName, setMyName] = useState("사용자");
   const [myAvatarUri, setMyAvatarUri] = useState<string | null>(null);
 
-  // 🔹 친구 목록
   const [friends, setFriends] = useState<Friend[]>([]);
-  // 🔹 서버 + 로컬 그룹
   const [groups, setGroups] = useState<FriendGroup[]>([]);
-  // 🔹 필터 탭
+
   const [filterTab, setFilterTab] = useState<"ALL" | "FAVORITE" | "GROUP">(
     "ALL"
   );
@@ -73,18 +69,27 @@ export default function FriendsScreen() {
     null
   );
 
-  // 🔹 그룹 관리 모달
+  // --- 검색 관련 상태 ---
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchText, setSearchText] = useState("");
+
+  // --- 설정 메뉴 관련 상태 ---
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+
   const [groupModalVisible, setGroupModalVisible] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [groupSelectIds, setGroupSelectIds] = useState<number[]>([]);
 
-  // 🔹 친구 추가 모달
   const [addVisible, setAddVisible] = useState(false);
   const [addType, setAddType] = useState<"PHONE" | "ZZAPID">("PHONE");
   const [identifier, setIdentifier] = useState("");
   const [adding, setAdding] = useState(false);
 
-  /** 🔸 친구 목록 로드 */
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuType, setMenuType] = useState<"FRIEND" | "GROUP">("FRIEND");
+  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<FriendGroup | null>(null);
+
   const loadFriends = async () => {
     try {
       const data: FriendListResponseDto = await getFriendList();
@@ -104,17 +109,9 @@ export default function FriendsScreen() {
         }
       };
 
-      // 생일 친구
-      // 생일 친구
       (data.birthdayFriends || []).forEach((f: any) =>
-        upsert({
-          id: f.userId,
-          friendshipId: f.friendshipId,
-          name: f.nickname,
-        })
+        upsert({ id: f.userId, friendshipId: f.friendshipId, name: f.nickname })
       );
-
-      // 즐겨찾기
       (data.favoriteFriends || []).forEach((f: any) =>
         upsert({
           id: f.userId,
@@ -124,10 +121,10 @@ export default function FriendsScreen() {
         })
       );
 
-      // 커스텀 그룹
       const serverGroups: FriendGroup[] = (data.customGroups || []).map(
         (g: any) => {
           const groupName = g.groupName ?? g.name ?? "그룹";
+          const groupId = g.groupId ?? g.id ?? 0;
           const groupFriends: Friend[] = (g.friends || []).map((f: any) => {
             const friend: Friend = {
               id: f.userId,
@@ -138,24 +135,18 @@ export default function FriendsScreen() {
             upsert(friend);
             return friend;
           });
-          return { name: groupName, friends: groupFriends };
+          return { id: groupId, name: groupName, friends: groupFriends };
         }
       );
 
-      // 기타 친구
       (data.otherFriends || []).forEach((f: any) =>
-        upsert({
-          id: f.userId,
-          friendshipId: f.friendshipId,
-          name: f.nickname,
-        })
+        upsert({ id: f.userId, friendshipId: f.friendshipId, name: f.nickname })
       );
 
       setFriends(Array.from(map.values()));
       setGroups(serverGroups);
     } catch (e: any) {
       console.error(e);
-      Alert.alert("오류", "친구 목록을 불러오지 못했어요.");
     }
   };
 
@@ -163,158 +154,214 @@ export default function FriendsScreen() {
     loadFriends();
   }, []);
 
-  /** 🔸 내 프로필 정보 로드 (상단 아바타 + 이름) */
   useEffect(() => {
     (async () => {
       try {
-        const me = await fetchMyProfile(); // GET /api/v1/users/profile
-        setMyName(me.nickname || me.name || "사용자"); // 나중에 로그인 사용자 이름 자동 반영
+        const me = await fetchMyProfile();
+        setMyName(me.nickname || me.name || "사용자");
         setMyAvatarUri(me.profilePhotoUrl || null);
-      } catch (e) {
-        console.error("내 프로필 로드 실패:", e);
-        // 실패해도 기본값 "사용자"로 그냥 둠
-      }
+      } catch (e) {}
     })();
   }, []);
 
-  /** 🔸 친구 추가 */
   const handleAddFriend = async () => {
     const raw = identifier.trim();
     const cleaned = addType === "PHONE" ? raw.replace(/\D/g, "") : raw;
-
-    if (!cleaned) {
-      Alert.alert(
-        "알림",
-        addType === "PHONE"
-          ? "전화번호를 입력해 주세요."
-          : "ZzapID를 입력해 주세요."
-      );
-      return;
-    }
-
-    if (addType === "PHONE" && cleaned.length < 10) {
-      Alert.alert("알림", "전화번호를 다시 확인해 주세요.");
-      return;
-    }
-
+    if (!cleaned) return Alert.alert("알림", "정보를 입력해주세요.");
     setAdding(true);
     try {
-      const msg = await addFriend({ identifier: cleaned, type: addType });
-
-      Alert.alert("완료", msg || "친구가 추가되었습니다.");
+      await addFriend({ identifier: cleaned, type: addType });
       setIdentifier("");
       setAddVisible(false);
       await loadFriends();
     } catch (e: any) {
-      const msg =
-        e?.response?.data ||
-        e?.message ||
-        "친구를 추가하지 못했어요. 다시 확인해 주세요.";
-      Alert.alert("오류", msg);
+      Alert.alert("오류", "추가 실패");
     } finally {
       setAdding(false);
     }
   };
 
-  /** 🔸 친구 삭제 (길게 누르기) */
-  const handleDeleteFriend = (friendId: number) => {
-    Alert.alert("친구 삭제", "정말 이 친구를 삭제할까요?", [
+  const handleLongPressFriend = (friend: Friend) => {
+    setMenuType("FRIEND");
+    setSelectedFriend(friend);
+    setMenuVisible(true);
+  };
+
+  const handleLongPressGroup = (group: FriendGroup) => {
+    setMenuType("GROUP");
+    setSelectedGroup(group);
+    setMenuVisible(true);
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!selectedFriend) return;
+    setMenuVisible(false);
+    const newValue = !selectedFriend.isFavorite;
+
+    setFriends((prev) =>
+      prev.map((f) =>
+        f.id === selectedFriend.id ? { ...f, isFavorite: newValue } : f
+      )
+    );
+
+    try {
+      await updateFriendSetting({
+        friendId: selectedFriend.id,
+        isFavorite: newValue,
+      });
+    } catch (e) {
+      console.error("즐겨찾기 변경 실패", e);
+      Alert.alert("오류", "즐겨찾기 설정에 실패했습니다.");
+      setFriends((prev) =>
+        prev.map((f) =>
+          f.id === selectedFriend.id ? { ...f, isFavorite: !newValue } : f
+        )
+      );
+    }
+  };
+
+  const handleDeleteFriend = () => {
+    if (!selectedFriend) return;
+    setMenuVisible(false);
+    Alert.alert("삭제", "삭제하시겠습니까?", [
       { text: "취소", style: "cancel" },
       {
         text: "삭제",
         style: "destructive",
         onPress: async () => {
           try {
-            await deleteFriend(friendId);
-            setFriends((prev) => prev.filter((f) => f.id !== friendId));
-            // 그룹에서도 제거
-            setGroups((prev) =>
-              prev.map((g) => ({
-                ...g,
-                friends: g.friends.filter((f) => f.id !== friendId),
-              }))
-            );
-          } catch (e: any) {
-            Alert.alert("오류", "친구 삭제 중 오류가 발생했어요.");
+            await deleteFriend(selectedFriend.id);
+            await loadFriends();
+          } catch {
+            Alert.alert("오류", "삭제 실패");
           }
         },
       },
     ]);
   };
 
-  /** 🔸 현재 탭에 맞게 필터링 */
+  const handleBlockFriend = () => {
+    setMenuVisible(false);
+    Alert.alert("알림", "기능 준비 중입니다.");
+  };
+
+  const handleDeleteGroup = () => {
+    if (!selectedGroup) return;
+    setMenuVisible(false);
+    Alert.alert(
+      "그룹 삭제",
+      `'${selectedGroup.name}' 그룹을 삭제하시겠습니까?\n(친구는 삭제되지 않습니다)`,
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "삭제",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteFriendGroup(selectedGroup.id);
+              setGroups((prev) =>
+                prev.filter((g) => g.id !== selectedGroup.id)
+              );
+              if (selectedGroupName === selectedGroup.name) {
+                setFilterTab("ALL");
+                setSelectedGroupName(null);
+              }
+            } catch (e) {
+              console.error(e);
+              Alert.alert("오류", "그룹 삭제에 실패했습니다.");
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // 검색어 필터링 추가
   const filteredFriends = (() => {
+    let result = friends;
+
+    // 1. 탭 필터
     if (filterTab === "FAVORITE") {
-      return friends.filter((f) => f.isFavorite);
+      result = result.filter((f) => f.isFavorite);
+    } else if (filterTab === "GROUP") {
+      if (!selectedGroupName) result = [];
+      else result = result.filter((f) => f.groupName === selectedGroupName);
     }
-    if (filterTab === "GROUP") {
-      if (!selectedGroupName) return [];
-      return friends.filter((f) => f.groupName === selectedGroupName);
+
+    // 2. 검색어 필터
+    if (searchText) {
+      result = result.filter((f) =>
+        f.name.toLowerCase().includes(searchText.toLowerCase())
+      );
     }
-    return friends;
+
+    return result;
   })();
 
-  /** 🔸 그룹 생성 핸들러 (프론트 상태만) */
-  /** 🔸 그룹 생성 핸들러 (서버 연동) */
   const handleCreateGroup = async () => {
     const name = newGroupName.trim();
-    if (!name) return;
-
-    if (groupSelectIds.length === 0) {
-      Alert.alert("알림", "그룹에 넣을 친구를 선택해 주세요.");
-      return;
-    }
-
+    if (!name || groupSelectIds.length === 0) return;
     try {
-      // 1) 그룹 생성
       const group = await createFriendGroup({ groupName: name });
-
-      // 2) 선택한 친구들을 그룹에 추가
       const selectedFriends = friends.filter((f) =>
         groupSelectIds.includes(f.id)
       );
-
       await Promise.all(
-        selectedFriends
-          .filter((f) => typeof f.friendshipId === "number")
-          .map((f) =>
-            addFriendToGroup({
-              groupId: group.id,
-              friendshipId: f.friendshipId,
-            })
-          )
+        selectedFriends.map((f) =>
+          addFriendToGroup({ groupId: group.id, friendshipId: f.friendshipId })
+        )
       );
-
-      // 3) 서버 상태 기준으로 친구/그룹 리스트 재로딩
       await loadFriends();
-
-      // 4) 방금 만든 그룹으로 필터 전환
-      setSelectedGroupName(group.groupName);
-      setFilterTab("GROUP");
-
-      // 5) 모달 초기화
+      setGroupModalVisible(false);
       setNewGroupName("");
       setGroupSelectIds([]);
-      setGroupModalVisible(false);
-    } catch (e: any) {
-      console.error("그룹 생성 / 그룹에 친구 추가 실패:", e);
-      const msg =
-        e?.response?.data ||
-        e?.message ||
-        "그룹 생성 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.";
-      Alert.alert("오류", msg);
+    } catch {
+      Alert.alert("오류", "그룹 생성 실패");
+    }
+  };
+
+  // --- 헤더 검색 처리 ---
+  const handleSearchToggle = () => {
+    if (isSearching) {
+      // 검색 종료
+      setIsSearching(false);
+      setSearchText("");
+      Keyboard.dismiss();
+    } else {
+      // 검색 시작
+      setIsSearching(true);
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        {/* 상단 헤더 */}
-        <View style={styles.header}>
+        {/* ================= HEADER ================= */}
+        <View style={[styles.header, localStyles.headerContainer]}>
+          <View style={localStyles.absoluteTitleContainer}>
+            {isSearching ? (
+              <TextInput
+                style={localStyles.searchInput}
+                placeholder="친구 이름 검색"
+                value={searchText}
+                onChangeText={setSearchText}
+                autoFocus={true}
+              />
+            ) : (
+              <Text style={styles.headerTitle}>친구</Text>
+            )}
+          </View>
+
           <View style={styles.headerLeft} />
-          <Text style={styles.headerTitle}>친구</Text>
-          <View style={styles.headerRight}>
-            <Ionicons name="search" size={20} style={styles.headerIcon} />
+
+          <View style={[styles.headerRight, localStyles.headerRight]}>
+            <Pressable onPress={handleSearchToggle}>
+              <Ionicons
+                name={isSearching ? "close" : "search"}
+                size={20}
+                style={styles.headerIcon}
+              />
+            </Pressable>
 
             <Pressable onPress={() => setAddVisible(true)}>
               <Ionicons
@@ -324,15 +371,17 @@ export default function FriendsScreen() {
               />
             </Pressable>
 
-            <Ionicons
-              name="settings-outline"
-              size={20}
-              style={styles.headerIcon}
-            />
+            <Pressable onPress={() => setSettingsMenuVisible(true)}>
+              <Ionicons
+                name="settings-outline"
+                size={20}
+                style={styles.headerIcon}
+              />
+            </Pressable>
           </View>
         </View>
+        {/* =========================================== */}
 
-        {/* 내 프로필 (눌렀을 때 /profile로 이동) */}
         <Pressable
           style={styles.myProfileSection}
           onPress={() => router.push("/profile")}
@@ -347,17 +396,12 @@ export default function FriendsScreen() {
           )}
           <Text style={styles.myProfileName}>{myName}</Text>
         </Pressable>
-
-        {/* 구분선 */}
         <View style={styles.divider} />
-
-        {/* 친구 수: 한 줄에 "친구 수 0명" */}
         <View style={[styles.friendCountRow, localStyles.friendCountRowInline]}>
           <Text style={styles.friendCountLabel}>친구 수</Text>
           <Text style={styles.friendCountValue}>{friends.length}명</Text>
         </View>
 
-        {/* 필터 탭: 전체 / 즐겨찾기 / + */}
         <View style={localStyles.friendFilterRow}>
           <Pressable
             style={[
@@ -400,7 +444,32 @@ export default function FriendsScreen() {
             </Text>
           </Pressable>
 
-          {/* + : 그룹 관리 모달 열기 */}
+          {groups.map((group) => (
+            <Pressable
+              key={group.id}
+              style={[
+                localStyles.friendFilterTab,
+                selectedGroupName === group.name &&
+                  localStyles.friendFilterTabActive,
+              ]}
+              onPress={() => {
+                setFilterTab("GROUP");
+                setSelectedGroupName(group.name);
+              }}
+              onLongPress={() => handleLongPressGroup(group)}
+            >
+              <Text
+                style={[
+                  localStyles.friendFilterTabText,
+                  selectedGroupName === group.name &&
+                    localStyles.friendFilterTabTextActive,
+                ]}
+              >
+                {group.name}
+              </Text>
+            </Pressable>
+          ))}
+
           <Pressable
             style={localStyles.friendFilterPlusTab}
             onPress={() => setGroupModalVisible(true)}
@@ -409,7 +478,12 @@ export default function FriendsScreen() {
           </Pressable>
         </View>
 
-        {/* 친구 리스트 */}
+        {isSearching && filteredFriends.length === 0 && searchText !== "" && (
+          <View style={{ alignItems: "center", marginTop: 40 }}>
+            <Text style={{ color: "#888" }}>검색 결과가 없습니다.</Text>
+          </View>
+        )}
+
         <FlatList
           data={filteredFriends}
           keyExtractor={(item) => String(item.id)}
@@ -417,232 +491,293 @@ export default function FriendsScreen() {
           renderItem={({ item }) => (
             <Pressable
               style={styles.friendRow}
-              onLongPress={() => handleDeleteFriend(item.id)}
+              onLongPress={() => handleLongPressFriend(item)}
             >
               <View style={styles.friendAvatar}>
                 <Text style={styles.friendAvatarInitial}>
                   {item.name.charAt(0)}
                 </Text>
               </View>
-              <Text style={styles.friendName}>{item.name}</Text>
+              <Text style={styles.friendName}>
+                {item.name}
+                {item.isFavorite && (
+                  <Text style={{ color: "#FFD700" }}> ★</Text>
+                )}
+              </Text>
             </Pressable>
           )}
         />
 
-        {/* 🔻 친구 추가 모달 */}
-        {/* (이 아래 모달 부분은 그대로) */}
+        {/* ============ MODALS ============ */}
+
+        {/* ✅ [수정] 친구 추가 모달 (Pressable 구조로 변경하여 입력 문제 해결) */}
         <Modal
           visible={addVisible}
           transparent
           animationType="fade"
           onRequestClose={() => setAddVisible(false)}
         >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={modalStyles.overlay}>
-              <TouchableWithoutFeedback>
-                <View style={modalStyles.sheet}>
-                  <Text style={modalStyles.sheetTitle}>친구 추가</Text>
+          {/* 배경 누르면 닫기 */}
+          <Pressable
+            style={modalStyles.modalOverlay}
+            onPress={() => {
+              Keyboard.dismiss();
+              setAddVisible(false);
+            }}
+          >
+            {/* 내부 컨텐츠 (이벤트 전파 방지) */}
+            <Pressable
+              style={modalStyles.modalContainer}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <Text style={modalStyles.modalTitle}>친구 추가</Text>
 
-                  {/* 탭: 전화번호 / ZzapID */}
-                  <View style={modalStyles.tabRow}>
-                    <Pressable
-                      style={[
-                        modalStyles.tabButton,
-                        addType === "PHONE" && modalStyles.tabButtonActive,
-                      ]}
-                      onPress={() => setAddType("PHONE")}
-                    >
-                      <Text
-                        style={[
-                          modalStyles.tabText,
-                          addType === "PHONE" && modalStyles.tabTextActive,
-                        ]}
-                      >
-                        전화번호
-                      </Text>
-                    </Pressable>
+              <View style={modalStyles.tabRow}>
+                <Pressable
+                  style={[
+                    modalStyles.tabButton,
+                    addType === "PHONE" && modalStyles.tabButtonActive,
+                  ]}
+                  onPress={() => {
+                    setAddType("PHONE");
+                    setIdentifier("");
+                  }}
+                >
+                  <Text
+                    style={[
+                      modalStyles.tabText,
+                      addType === "PHONE" && modalStyles.tabTextActive,
+                    ]}
+                  >
+                    연락처
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    modalStyles.tabButton,
+                    addType === "ZZAPID" && modalStyles.tabButtonActive,
+                  ]}
+                  onPress={() => {
+                    setAddType("ZZAPID");
+                    setIdentifier("");
+                  }}
+                >
+                  <Text
+                    style={[
+                      modalStyles.tabText,
+                      addType === "ZZAPID" && modalStyles.tabTextActive,
+                    ]}
+                  >
+                    ID
+                  </Text>
+                </Pressable>
+              </View>
 
-                    <Pressable
-                      style={[
-                        modalStyles.tabButton,
-                        addType === "ZZAPID" && modalStyles.tabButtonActive,
-                      ]}
-                      onPress={() => setAddType("ZZAPID")}
-                    >
-                      <Text
-                        style={[
-                          modalStyles.tabText,
-                          addType === "ZZAPID" && modalStyles.tabTextActive,
-                        ]}
-                      >
-                        ZzapID
-                      </Text>
-                    </Pressable>
-                  </View>
+              <TextInput
+                style={modalStyles.input}
+                placeholder={addType === "PHONE" ? "010-0000-0000" : "ID 입력"}
+                value={identifier}
+                onChangeText={(text) => {
+                  if (addType === "PHONE") {
+                    setIdentifier(formatPhoneNumber(text));
+                  } else {
+                    setIdentifier(text);
+                  }
+                }}
+                keyboardType={addType === "PHONE" ? "number-pad" : "default"}
+              />
 
-                  {/* 입력 */}
-                  <View style={modalStyles.inputWrap}>
-                    <TextInput
-                      style={modalStyles.input}
-                      placeholder={
-                        addType === "PHONE"
-                          ? "전화번호 입력 (숫자만)"
-                          : "ZzapID 입력"
-                      }
-                      value={identifier}
-                      onChangeText={(t) => {
-                        if (addType === "PHONE")
-                          setIdentifier(formatPhoneNumber(t));
-                        else setIdentifier(t);
-                      }}
-                      keyboardType={
-                        addType === "PHONE" ? "number-pad" : "default"
-                      }
-                      autoCapitalize="none"
-                    />
-                  </View>
-
-                  {/* 버튼 */}
-                  <View style={modalStyles.buttonRow}>
-                    <Pressable
-                      style={[modalStyles.button, modalStyles.cancelButton]}
-                      onPress={() => {
-                        setIdentifier("");
-                        setAddVisible(false);
-                      }}
-                      disabled={adding}
-                    >
-                      <Text style={modalStyles.cancelText}>취소</Text>
-                    </Pressable>
-
-                    <Pressable
-                      style={[
-                        modalStyles.button,
-                        modalStyles.confirmButton,
-                        (!identifier.trim() || adding) && { opacity: 0.5 },
-                      ]}
-                      onPress={handleAddFriend}
-                      disabled={!identifier.trim() || adding}
-                    >
-                      <Text style={modalStyles.confirmText}>
-                        {adding ? "추가 중..." : "추가"}
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
-              </TouchableWithoutFeedback>
-            </View>
-          </TouchableWithoutFeedback>
+              <View style={modalStyles.buttonRow}>
+                <Pressable
+                  style={modalStyles.cancelButton}
+                  onPress={() => setAddVisible(false)}
+                >
+                  <Text style={modalStyles.cancelButtonText}>취소</Text>
+                </Pressable>
+                <Pressable
+                  style={modalStyles.addButton}
+                  onPress={handleAddFriend}
+                >
+                  <Text style={modalStyles.addButtonText}>
+                    {adding ? "추가 중..." : "추가"}
+                  </Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
         </Modal>
 
-        {/* 🔻 그룹 관리 모달 (+ 버튼) */}
+        {/* 2. 그룹 생성 모달 */}
         <Modal
-          visible={groupModalVisible}
-          transparent
           animationType="fade"
+          transparent={true}
+          visible={groupModalVisible}
           onRequestClose={() => setGroupModalVisible(false)}
         >
           <View style={localStyles.groupModalContainer}>
             <View style={localStyles.groupModalBox}>
-              <Text style={localStyles.groupModalTitle}>그룹 관리</Text>
+              <Text style={localStyles.groupModalTitle}>그룹 생성</Text>
 
-              {/* 기존 그룹 선택 (있으면) */}
-              {groups.length > 0 && (
-                <>
-                  <Text style={localStyles.groupSectionTitle}>그룹 선택</Text>
-                  {groups.map((g) => (
-                    <Pressable
-                      key={g.name}
-                      style={localStyles.groupItem}
-                      onPress={() => {
-                        setSelectedGroupName(g.name);
-                        setFilterTab("GROUP");
-                        setGroupModalVisible(false);
-                      }}
-                    >
-                      <Text style={localStyles.groupItemText}>{g.name}</Text>
-                    </Pressable>
-                  ))}
-                  <View style={localStyles.groupDivider} />
-                </>
-              )}
-
-              {/* 새 그룹 만들기 */}
-              <Text style={localStyles.groupSectionTitle}>새 그룹 만들기</Text>
+              <Text style={localStyles.groupSectionTitle}>그룹 이름</Text>
               <TextInput
                 style={localStyles.groupNameInput}
-                placeholder="그룹 이름"
+                placeholder="그룹 이름을 입력하세요"
                 value={newGroupName}
                 onChangeText={setNewGroupName}
               />
+
+              <Text style={localStyles.groupSectionTitle}>친구 선택</Text>
               <Text style={localStyles.groupHintText}>
-                그룹에 넣을 친구를 선택해 주세요.
+                그룹에 포함할 친구를 선택해주세요 ({groupSelectIds.length}명)
               </Text>
 
-              <View style={localStyles.groupFriendList}>
-                {friends.length === 0 ? (
-                  <Text style={localStyles.groupHintText}>
-                    추가된 친구가 없습니다.
-                  </Text>
-                ) : (
-                  friends.map((f) => {
-                    const selected = groupSelectIds.includes(f.id);
-                    return (
-                      <Pressable
-                        key={f.id}
-                        style={[
-                          localStyles.groupFriendItem,
-                          selected && localStyles.groupFriendItemSelected,
-                        ]}
-                        onPress={() => {
+              <FlatList
+                data={friends}
+                keyExtractor={(item) => String(item.id)}
+                style={localStyles.groupFriendList}
+                renderItem={({ item }) => {
+                  const isSelected = groupSelectIds.includes(item.id);
+                  return (
+                    <Pressable
+                      style={[
+                        localStyles.groupFriendItem,
+                        isSelected && localStyles.groupFriendItemSelected,
+                      ]}
+                      onPress={() => {
+                        if (isSelected) {
                           setGroupSelectIds((prev) =>
-                            prev.includes(f.id)
-                              ? prev.filter((id) => id !== f.id)
-                              : [...prev, f.id]
+                            prev.filter((id) => id !== item.id)
                           );
-                        }}
+                        } else {
+                          setGroupSelectIds((prev) => [...prev, item.id]);
+                        }
+                      }}
+                    >
+                      <Text
+                        style={[
+                          localStyles.groupFriendItemText,
+                          isSelected && localStyles.groupFriendItemTextSelected,
+                        ]}
                       >
-                        <Text
-                          style={[
-                            localStyles.groupFriendItemText,
-                            selected && localStyles.groupFriendItemTextSelected,
-                          ]}
-                        >
-                          {f.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })
-                )}
-              </View>
+                        {item.name} {isSelected && "✓"}
+                      </Text>
+                    </Pressable>
+                  );
+                }}
+              />
 
               <Pressable
-                style={[
-                  localStyles.groupCreateButton,
-                  (!newGroupName.trim() || groupSelectIds.length === 0) && {
-                    opacity: 0.4,
-                  },
-                ]}
-                disabled={!newGroupName.trim() || groupSelectIds.length === 0}
+                style={localStyles.groupCreateButton}
                 onPress={handleCreateGroup}
               >
-                <Text style={localStyles.groupCreateButtonText}>
-                  그룹 만들기
-                </Text>
+                <Text style={localStyles.groupCreateButtonText}>완료</Text>
               </Pressable>
 
               <Pressable
                 style={localStyles.groupModalClose}
-                onPress={() => {
-                  setGroupModalVisible(false);
-                  setNewGroupName("");
-                  setGroupSelectIds([]);
-                }}
+                onPress={() => setGroupModalVisible(false)}
               >
-                <Text style={localStyles.groupModalCloseText}>닫기</Text>
+                <Text style={localStyles.groupModalCloseText}>취소</Text>
               </Pressable>
             </View>
           </View>
+        </Modal>
+
+        {/* 3. 친구/그룹 관리 컨텍스트 메뉴 모달 */}
+        <Modal
+          transparent={true}
+          visible={menuVisible}
+          animationType="fade"
+          onRequestClose={() => setMenuVisible(false)}
+        >
+          <Pressable
+            style={localStyles.menuOverlay}
+            onPress={() => setMenuVisible(false)}
+          >
+            <View style={localStyles.menuContainer}>
+              <View style={localStyles.menuHeader}>
+                <Text style={localStyles.menuTitle}>
+                  {menuType === "FRIEND"
+                    ? selectedFriend?.name
+                    : selectedGroup?.name}
+                </Text>
+              </View>
+
+              {menuType === "FRIEND" ? (
+                <>
+                  <TouchableOpacity
+                    style={localStyles.menuItem}
+                    onPress={handleToggleFavorite}
+                  >
+                    <Text style={localStyles.menuItemText}>
+                      {selectedFriend?.isFavorite
+                        ? "즐겨찾기 해제"
+                        : "즐겨찾기 추가"}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={localStyles.menuItem}
+                    onPress={handleDeleteFriend}
+                  >
+                    <Text style={localStyles.menuItemText}>삭제</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={localStyles.menuItem}
+                    onPress={handleBlockFriend}
+                  >
+                    <Text style={localStyles.menuItemText}>차단</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={localStyles.menuItem}
+                    onPress={handleDeleteGroup}
+                  >
+                    <Text
+                      style={[localStyles.menuItemText, { color: "#FF4444" }]}
+                    >
+                      그룹 삭제
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </Pressable>
+        </Modal>
+
+        {/* 4. 우측 상단 설정 드롭다운 메뉴 */}
+        <Modal
+          transparent={true}
+          visible={settingsMenuVisible}
+          animationType="fade"
+          onRequestClose={() => setSettingsMenuVisible(false)}
+        >
+          <Pressable
+            style={localStyles.settingsOverlay}
+            onPress={() => setSettingsMenuVisible(false)}
+          >
+            <View style={localStyles.settingsDropdown}>
+              <TouchableOpacity
+                style={localStyles.settingsItem}
+                onPress={() => {
+                  setSettingsMenuVisible(false);
+                  Alert.alert("알림", "친구 관리 기능");
+                }}
+              >
+                <Text style={localStyles.settingsItemText}>친구 관리</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={localStyles.settingsItem}
+                onPress={() => {
+                  setSettingsMenuVisible(false);
+                  Alert.alert("알림", "전체 설정 기능");
+                }}
+              >
+                <Text style={localStyles.settingsItemText}>전체 설정</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
         </Modal>
       </View>
     </SafeAreaView>
@@ -650,15 +785,45 @@ export default function FriendsScreen() {
 }
 
 const PURPLE = "#9997FF";
-/* 🔸 이 파일 안에서만 쓰는 로컬 스타일 */
 const localStyles = StyleSheet.create({
+  headerContainer: {
+    position: "relative",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexDirection: "row",
+    height: 56, // 높이 명시
+  },
+  absoluteTitleContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 1, // 레이어 순서 하단
+  },
+  searchInput: {
+    width: "60%",
+    backgroundColor: "#F5F5F5",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 14,
+    color: "#333",
+  },
+  headerRight: {
+    zIndex: 10, // 레이어 순서 상단 (버튼 클릭 가능하도록)
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
   friendCountRowInline: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 16,
   },
-
   friendFilterRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -666,6 +831,7 @@ const localStyles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 4,
     gap: 8,
+    flexWrap: "wrap",
   },
   friendFilterTab: {
     paddingHorizontal: 12,
@@ -675,19 +841,9 @@ const localStyles = StyleSheet.create({
     borderColor: PURPLE,
     backgroundColor: "#FFFFFF",
   },
-  friendFilterTabActive: {
-    backgroundColor: PURPLE,
-    borderColor: PURPLE,
-  },
-  friendFilterTabText: {
-    fontSize: 13,
-    color: PURPLE,
-    fontWeight: "500",
-  },
-  friendFilterTabTextActive: {
-    color: "#FFFFFF",
-    fontWeight: "600",
-  },
+  friendFilterTabActive: { backgroundColor: PURPLE, borderColor: PURPLE },
+  friendFilterTabText: { fontSize: 13, color: PURPLE, fontWeight: "500" },
+  friendFilterTabTextActive: { color: "#FFFFFF", fontWeight: "600" },
   friendFilterPlusTab: {
     width: 28,
     height: 28,
@@ -697,7 +853,29 @@ const localStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  menuContainer: {
+    width: 250,
+    backgroundColor: "white",
+    borderRadius: 12,
+    paddingVertical: 10,
+    elevation: 5,
+  },
+  menuHeader: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+    marginBottom: 5,
+  },
+  menuTitle: { fontSize: 16, fontWeight: "bold", color: "#333" },
+  menuItem: { paddingVertical: 12, paddingHorizontal: 20 },
+  menuItemText: { fontSize: 15, color: "#333" },
   groupModalContainer: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.25)",
@@ -712,29 +890,16 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 18,
     backgroundColor: "#fff",
   },
-  groupModalTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
+  groupModalTitle: { fontSize: 16, fontWeight: "700", marginBottom: 8 },
   groupSectionTitle: {
     fontSize: 14,
     fontWeight: "600",
     marginTop: 8,
     marginBottom: 4,
   },
-  groupItem: {
-    paddingVertical: 6,
-  },
-  groupItemText: {
-    fontSize: 14,
-  },
-  groupDivider: {
-    height: 1,
-    backgroundColor: "#EEE",
-    marginVertical: 8,
-  },
-
+  groupItem: { paddingVertical: 6 },
+  groupItemText: { fontSize: 14 },
+  groupDivider: { height: 1, backgroundColor: "#EEE", marginVertical: 8 },
   groupNameInput: {
     borderWidth: 1,
     borderColor: "#E0E0FF",
@@ -749,28 +914,15 @@ const localStyles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 4,
   },
-  groupFriendList: {
-    maxHeight: 160,
-    marginTop: 4,
-    marginBottom: 8,
-  },
+  groupFriendList: { maxHeight: 160, marginTop: 4, marginBottom: 8 },
   groupFriendItem: {
     paddingVertical: 4,
     paddingHorizontal: 8,
     borderRadius: 6,
   },
-  groupFriendItemSelected: {
-    backgroundColor: "#ECE8FF",
-  },
-  groupFriendItemText: {
-    fontSize: 13,
-    color: "#333",
-  },
-  groupFriendItemTextSelected: {
-    color: "#7B61FF",
-    fontWeight: "600",
-  },
-
+  groupFriendItemSelected: { backgroundColor: "#ECE8FF" },
+  groupFriendItemText: { fontSize: 13, color: "#333" },
+  groupFriendItemTextSelected: { color: "#7B61FF", fontWeight: "600" },
   groupCreateButton: {
     marginTop: 4,
     paddingVertical: 8,
@@ -779,18 +931,35 @@ const localStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  groupCreateButtonText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
+  groupCreateButtonText: { color: "#fff", fontSize: 14, fontWeight: "600" },
+  groupModalClose: { marginTop: 10, alignSelf: "flex-end" },
+  groupModalCloseText: { fontSize: 13, color: "#7B61FF" },
+  settingsOverlay: {
+    flex: 1,
+    backgroundColor: "transparent",
   },
-
-  groupModalClose: {
-    marginTop: 10,
-    alignSelf: "flex-end",
+  settingsDropdown: {
+    position: "absolute",
+    top: 50,
+    right: 16,
+    backgroundColor: "white",
+    borderRadius: 8,
+    paddingVertical: 8,
+    minWidth: 150,
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    borderWidth: 1,
+    borderColor: "#eee",
   },
-  groupModalCloseText: {
-    fontSize: 13,
-    color: "#7B61FF",
+  settingsItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  settingsItemText: {
+    fontSize: 15,
+    color: "#333",
   },
 });
