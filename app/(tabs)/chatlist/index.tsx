@@ -1,3 +1,4 @@
+// app/(tabs)/chatlist/index.tsx
 import React, { useState, useCallback } from "react";
 import {
   ActivityIndicator,
@@ -10,10 +11,14 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  RefreshControl, // ✅ 추가
+  RefreshControl,
+  // StyleSheet 제거 (더 이상 필요 없음)
 } from "react-native";
-import { useRouter, type Href, useFocusEffect } from "expo-router"; // ✅ useFocusEffect 추가
+import { useRouter, type Href, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+
+// ✅ Store Import
+import { useChatListStore } from "../../../src/store/chatListStore";
 
 import {
   getChatRoomList,
@@ -26,8 +31,11 @@ import styles from "../../../src/styles/chat/ChatList.module";
 export default function ChatListScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false); // ✅ 당겨서 새로고침용 상태
-  const [rooms, setRooms] = useState<ChatRoomUserListItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // ✅ useState 제거하고 Store 사용
+  const rooms = useChatListStore((state) => state.rooms);
+  const setRooms = useChatListStore((state) => state.setRooms);
 
   // 모달 관련 상태
   const [showCreate, setShowCreate] = useState(false);
@@ -35,13 +43,11 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ 데이터 로딩 함수 (refreshing 여부 분리)
+  // 데이터 로딩
   const fetchRooms = async (isRefresh = false) => {
-    if (!isRefresh) setLoading(true);
+    if (!isRefresh && rooms.length === 0) setLoading(true);
     try {
       const data = await getChatRoomList();
-      // 최신순 정렬 (혹시 백엔드가 안 해줄 경우 대비)
-      // const sorted = data.sort((a, b) => ... );
       setRooms(data);
     } catch (e) {
       console.error("[ChatList] 채팅방 목록 조회 실패:", e);
@@ -51,14 +57,14 @@ export default function ChatListScreen() {
     }
   };
 
-  // ✅ 화면에 들어올 때마다 실행 (useEffect 대신 사용)
+  // 화면 포커스 시 갱신
   useFocusEffect(
     useCallback(() => {
       fetchRooms();
     }, [])
   );
 
-  // ✅ 당겨서 새로고침 핸들러
+  // 당겨서 새로고침
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchRooms(true);
@@ -67,7 +73,7 @@ export default function ChatListScreen() {
   const goRoom = useCallback(
     (roomId: number, roomName?: string) => {
       router.push({
-        pathname: `/chat/${roomId}`, // ⚠️ 폴더 구조 변경 제안에 맞춰 경로 수정 (필요시 chatlist로 복구)
+        pathname: `/chat/${roomId}`,
         params: roomName ? { title: roomName } : {},
       } as Href);
     },
@@ -91,7 +97,6 @@ export default function ChatListScreen() {
       setCreating(true);
       const room = await createOrGetSingleChatRoom(idNum);
 
-      // any 타입 안전하게 처리
       const r = room as any;
       const roomId = r.roomId ?? r.id;
       const roomName = r.roomName ?? r.title ?? r.name ?? "채팅방";
@@ -103,8 +108,6 @@ export default function ChatListScreen() {
 
       setShowCreate(false);
       setPartnerId("");
-
-      // 방 생성 후 목록 갱신하고 이동
       await fetchRooms();
       goRoom(roomId, roomName);
     } catch (err: any) {
@@ -117,14 +120,21 @@ export default function ChatListScreen() {
     } finally {
       setCreating(false);
     }
-  }, [partnerId, goRoom]); // fetchRooms는 의존성 제외해도 됨
+  }, [partnerId, goRoom]);
 
   return (
     <View style={styles.safeArea}>
+      {/* ✅ [수정] 헤더 영역: 스타일 파일(module)의 클래스 사용 */}
       <View style={styles.header}>
-        <View style={styles.headerLeft} />
-        <Text style={styles.headerTitle}>채팅</Text>
+        {/* 타이틀을 화면 정중앙에 배치하기 위한 절대 위치 컨테이너 */}
+        <View style={styles.headerTitleWrapper}>
+          <Text style={styles.headerTitle}>채팅</Text>
+        </View>
 
+        {/* 왼쪽 빈 공간 (기존 유지) */}
+        <View style={styles.headerLeft} />
+
+        {/* 오른쪽 아이콘 영역 */}
         <View style={styles.headerRight}>
           <Pressable style={styles.headerIconBtn}>
             <Ionicons name="search" size={20} style={styles.headerIcon} />
@@ -151,11 +161,9 @@ export default function ChatListScreen() {
             styles.roomList,
             rooms.length === 0 && { flex: 1 },
           ]}
-          // ✅ 당겨서 새로고침 연결
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
-          // ✅ 빈 화면 처리
           ListEmptyComponent={
             <View
               style={{
@@ -177,28 +185,36 @@ export default function ChatListScreen() {
               onPress={() => goRoom(item.roomId, item.roomName)}
             >
               <View style={styles.roomAvatar}>
-                {/* 이미지가 있다면 Image 컴포넌트 사용, 없으면 이니셜 */}
                 <Text style={styles.roomAvatarInitial}>
                   {item.roomName?.charAt(0) ?? "?"}
                 </Text>
               </View>
 
-              {/* 텍스트 영역: 이름 밑에 마지막 메시지 미리보기 추가 가능 */}
               <View style={{ flex: 1, justifyContent: "center" }}>
-                <Text style={styles.roomName} numberOfLines={1}>
-                  {item.roomName || "알 수 없는 채팅방"}
+                {/* 상단: 방 이름 */}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    marginBottom: 2,
+                  }}
+                >
+                  <Text style={styles.roomName} numberOfLines={1}>
+                    {item.roomName || "알 수 없는 채팅방"}
+                  </Text>
+                </View>
+
+                {/* 하단: 마지막 메시지 */}
+                <Text style={{ fontSize: 13, color: "#888" }} numberOfLines={1}>
+                  {(item as any).lastMessage || "대화 내용이 없습니다."}
                 </Text>
-                {/* item에 lastMessage 속성이 있다면 여기에 추가 */}
-                {/* <Text style={styles.lastMessage} numberOfLines={1}>
-                    {item.lastMessage || "대화 내용이 없습니다."}
-                 </Text> */}
               </View>
             </Pressable>
           )}
         />
       )}
 
-      {/* --- 모달 부분 (기존 코드 유지) --- */}
+      {/* 모달 */}
       <Modal
         visible={showCreate}
         transparent
