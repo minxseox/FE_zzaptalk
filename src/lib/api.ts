@@ -1,6 +1,5 @@
 // src/lib/api.ts
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
-import { Platform } from "react-native";
 
 /** ===============================
  * 커스텀 에러 클래스
@@ -17,32 +16,25 @@ export class ApiError extends Error {
 }
 
 /** ===============================
- * ★ BASE URL 설정 (수정 완료)
- * - 1순위: 환경변수 (.env)
- * - 2순위: 웹일 경우 Nginx Proxy (/api)
- * - 3순위: 앱일 경우 실서버 주소 (기본값)
+ * ★ BASE URL 설정
+ *
+ * 요구사항:
+ *  1) API_BASE 는 무조건 환경 변수(process.env.REACT_APP_API_URL)에서 읽는다.
+ *  2) 값이 비어 있을 때만 기본값(https://api.zzaptalk.com)을 사용한다.
  * =============================== */
-const getBaseUrl = () => {
-  // 1. 환경 변수가 있으면 무조건 최우선으로 사용합니다.
-  // (로컬 개발 시 내 PC IP를 .env에 적으면 여기서 걸립니다.)
-  if (process.env.EXPO_PUBLIC_API_BASE) {
-    return process.env.EXPO_PUBLIC_API_BASE;
-  }
+const envBase = process.env.REACT_APP_API_URL;
 
-  // 2. 환경 변수가 없고 + 웹(Web) 환경일 때
-  // Docker/Nginx 환경에서는 '/api' 상대 경로를 사용해야 프록시가 작동합니다.
-  if (Platform.OS === "web") {
-    return "/api";
-  }
+// 값이 없을 때만 기본값 사용 + 경고 로그
+if (!envBase) {
+  console.warn(
+    "[API] REACT_APP_API_URL is not set. Fallback to https://api.zzaptalk.com"
+  );
+}
 
-  // 3. 환경 변수가 없고 + 앱(App) 환경일 때
-  // 백엔드 개발자 요청대로 "배포 주소"를 기본값으로 설정합니다.
-  return "https://api.zzaptalk.com";
-};
+// 교수님이 말한 API_BASE 값
+export const BASE = (envBase || "https://api.zzaptalk.com").replace(/\/+$/, "");
 
-export const BASE = getBaseUrl().replace(/\/+$/, "");
-
-console.log(`[API] Environment: ${Platform.OS}, Base URL: ${BASE}`);
+console.log(`[API] Base URL: ${BASE}`);
 
 /** ===============================
  * 전역 토큰 캐시
@@ -57,6 +49,7 @@ export function setApiAuthToken(token: string | null) {
     delete (api.defaults.headers as any).common["Authorization"];
   }
 }
+
 export function clearApiAuthToken() {
   setApiAuthToken(null);
 }

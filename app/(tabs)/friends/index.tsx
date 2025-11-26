@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
+// ★ 스타일 통합: localStyles를 제거하고 styles 하나만 사용합니다.
 import styles from "../../../src/styles/friends/Friends.module";
 import modalStyles from "../../../src/styles/friends/FriendAddModal.module";
 import { updateFriendSetting } from "../../../src/services/friends";
@@ -28,7 +29,7 @@ import {
   createFriendGroup,
   addFriendToGroup,
   deleteFriendGroup,
-  blockFriend, // ✅ [추가] 차단 API 함수 임포트
+  blockFriend,
 } from "../../../src/services/friends";
 import { fetchMyProfile } from "../../../src/services/profile";
 import type { FriendListResponseDto } from "../../../src/types/friends";
@@ -371,11 +372,11 @@ export default function FriendsScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         {/* ================= HEADER ================= */}
-        <View style={[styles.header, localStyles.headerContainer]}>
-          <View style={localStyles.absoluteTitleContainer}>
+        <View style={[styles.header, styles.headerContainer]}>
+          <View style={styles.absoluteTitleContainer}>
             {isSearching ? (
               <TextInput
-                style={localStyles.searchInput}
+                style={styles.searchInput}
                 placeholder="친구 이름 검색"
                 value={searchText}
                 onChangeText={setSearchText}
@@ -388,7 +389,7 @@ export default function FriendsScreen() {
 
           <View style={styles.headerLeft} />
 
-          <View style={[styles.headerRight, localStyles.headerRight]}>
+          <View style={[styles.headerRight, styles.headerRight]}>
             <Pressable onPress={handleSearchToggle}>
               <Ionicons
                 name={isSearching ? "close" : "search"}
@@ -431,16 +432,16 @@ export default function FriendsScreen() {
           <Text style={styles.myProfileName}>{myName}</Text>
         </Pressable>
         <View style={styles.divider} />
-        <View style={[styles.friendCountRow, localStyles.friendCountRowInline]}>
+        <View style={[styles.friendCountRow, styles.friendCountRowInline]}>
           <Text style={styles.friendCountLabel}>친구 수</Text>
           <Text style={styles.friendCountValue}>{friends.length}명</Text>
         </View>
 
-        <View style={localStyles.friendFilterRow}>
+        <View style={styles.friendFilterRow}>
           <Pressable
             style={[
-              localStyles.friendFilterTab,
-              filterTab === "ALL" && localStyles.friendFilterTabActive,
+              styles.friendFilterTab,
+              filterTab === "ALL" && styles.friendFilterTabActive,
             ]}
             onPress={() => {
               setFilterTab("ALL");
@@ -449,8 +450,8 @@ export default function FriendsScreen() {
           >
             <Text
               style={[
-                localStyles.friendFilterTabText,
-                filterTab === "ALL" && localStyles.friendFilterTabTextActive,
+                styles.friendFilterTabText,
+                filterTab === "ALL" && styles.friendFilterTabTextActive,
               ]}
             >
               전체
@@ -459,8 +460,8 @@ export default function FriendsScreen() {
 
           <Pressable
             style={[
-              localStyles.friendFilterTab,
-              filterTab === "FAVORITE" && localStyles.friendFilterTabActive,
+              styles.friendFilterTab,
+              filterTab === "FAVORITE" && styles.friendFilterTabActive,
             ]}
             onPress={() => {
               setFilterTab("FAVORITE");
@@ -469,9 +470,8 @@ export default function FriendsScreen() {
           >
             <Text
               style={[
-                localStyles.friendFilterTabText,
-                filterTab === "FAVORITE" &&
-                  localStyles.friendFilterTabTextActive,
+                styles.friendFilterTabText,
+                filterTab === "FAVORITE" && styles.friendFilterTabTextActive,
               ]}
             >
               즐겨찾기
@@ -482,9 +482,9 @@ export default function FriendsScreen() {
             <Pressable
               key={group.id}
               style={[
-                localStyles.friendFilterTab,
+                styles.friendFilterTab,
                 selectedGroupName === group.name &&
-                  localStyles.friendFilterTabActive,
+                  styles.friendFilterTabActive,
               ]}
               onPress={() => {
                 setFilterTab("GROUP");
@@ -494,9 +494,9 @@ export default function FriendsScreen() {
             >
               <Text
                 style={[
-                  localStyles.friendFilterTabText,
+                  styles.friendFilterTabText,
                   selectedGroupName === group.name &&
-                    localStyles.friendFilterTabTextActive,
+                    styles.friendFilterTabTextActive,
                 ]}
               >
                 {group.name}
@@ -505,7 +505,7 @@ export default function FriendsScreen() {
           ))}
 
           <Pressable
-            style={localStyles.friendFilterPlusTab}
+            style={styles.friendFilterPlusTab}
             onPress={() => setGroupModalVisible(true)}
           >
             <Ionicons name="add" size={16} color="#7B61FF" />
@@ -546,7 +546,7 @@ export default function FriendsScreen() {
 
               {/* 오른쪽: 점 3개 메뉴 버튼 */}
               <TouchableOpacity
-                style={localStyles.moreButton}
+                style={styles.moreButton}
                 onPress={() => handleOpenFriendMenu(item)}
               >
                 <Ionicons name="ellipsis-vertical" size={20} color="#ccc" />
@@ -659,34 +659,34 @@ export default function FriendsScreen() {
           visible={groupModalVisible}
           onRequestClose={() => setGroupModalVisible(false)}
         >
-          <View style={localStyles.groupModalContainer}>
-            <View style={localStyles.groupModalBox}>
-              <Text style={localStyles.groupModalTitle}>그룹 생성</Text>
+          <View style={styles.groupModalContainer}>
+            <View style={styles.groupModalBox}>
+              <Text style={styles.groupModalTitle}>그룹 생성</Text>
 
-              <Text style={localStyles.groupSectionTitle}>그룹 이름</Text>
+              <Text style={styles.groupSectionTitle}>그룹 이름</Text>
               <TextInput
-                style={localStyles.groupNameInput}
+                style={styles.groupNameInput}
                 placeholder="그룹 이름을 입력하세요"
                 value={newGroupName}
                 onChangeText={setNewGroupName}
               />
 
-              <Text style={localStyles.groupSectionTitle}>친구 선택</Text>
-              <Text style={localStyles.groupHintText}>
+              <Text style={styles.groupSectionTitle}>친구 선택</Text>
+              <Text style={styles.groupHintText}>
                 그룹에 포함할 친구를 선택해주세요 ({groupSelectIds.length}명)
               </Text>
 
               <FlatList
                 data={friends}
                 keyExtractor={(item) => String(item.id)}
-                style={localStyles.groupFriendList}
+                style={styles.groupFriendList}
                 renderItem={({ item }) => {
                   const isSelected = groupSelectIds.includes(item.id);
                   return (
                     <Pressable
                       style={[
-                        localStyles.groupFriendItem,
-                        isSelected && localStyles.groupFriendItemSelected,
+                        styles.groupFriendItem,
+                        isSelected && styles.groupFriendItemSelected,
                       ]}
                       onPress={() => {
                         if (isSelected) {
@@ -700,8 +700,8 @@ export default function FriendsScreen() {
                     >
                       <Text
                         style={[
-                          localStyles.groupFriendItemText,
-                          isSelected && localStyles.groupFriendItemTextSelected,
+                          styles.groupFriendItemText,
+                          isSelected && styles.groupFriendItemTextSelected,
                         ]}
                       >
                         {item.name} {isSelected && "✓"}
@@ -712,17 +712,17 @@ export default function FriendsScreen() {
               />
 
               <Pressable
-                style={localStyles.groupCreateButton}
+                style={styles.groupCreateButton}
                 onPress={handleCreateGroup}
               >
-                <Text style={localStyles.groupCreateButtonText}>완료</Text>
+                <Text style={styles.groupCreateButtonText}>완료</Text>
               </Pressable>
 
               <Pressable
-                style={localStyles.groupModalClose}
+                style={styles.groupModalClose}
                 onPress={() => setGroupModalVisible(false)}
               >
-                <Text style={localStyles.groupModalCloseText}>취소</Text>
+                <Text style={styles.groupModalCloseText}>취소</Text>
               </Pressable>
             </View>
           </View>
@@ -737,13 +737,13 @@ export default function FriendsScreen() {
         >
           {/* 모달 바깥 터치시 닫기 */}
           <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
-            <View style={localStyles.menuOverlay}>
+            <View style={styles.menuOverlay}>
               {/* 메뉴 박스 내부 터치시 닫기 방지 */}
               <TouchableWithoutFeedback>
-                <View style={localStyles.menuContainer}>
+                <View style={styles.menuContainer}>
                   {/* 상단 이름 영역 */}
-                  <View style={localStyles.menuHeader}>
-                    <Text style={localStyles.menuTitle}>
+                  <View style={styles.menuHeader}>
+                    <Text style={styles.menuTitle}>
                       {menuType === "FRIEND"
                         ? selectedFriend?.name
                         : selectedGroup?.name}
@@ -753,40 +753,37 @@ export default function FriendsScreen() {
                   {menuType === "FRIEND" ? (
                     <>
                       <TouchableOpacity
-                        style={localStyles.menuItem}
+                        style={styles.menuItem}
                         onPress={handleToggleFavorite}
                       >
-                        <Text style={localStyles.menuItemText}>
+                        <Text style={styles.menuItemText}>
                           {selectedFriend?.isFavorite
                             ? "즐겨찾기 해제"
                             : "즐겨찾기 추가"}
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={localStyles.menuItem}
+                        style={styles.menuItem}
                         onPress={handleDeleteFriend}
                       >
-                        <Text style={localStyles.menuItemText}>삭제</Text>
+                        <Text style={styles.menuItemText}>삭제</Text>
                       </TouchableOpacity>
                       {/* ✅ [연결] 차단 버튼 */}
                       <TouchableOpacity
-                        style={localStyles.menuItem}
+                        style={styles.menuItem}
                         onPress={handleBlockFriend}
                       >
-                        <Text style={localStyles.menuItemText}>차단</Text>
+                        <Text style={styles.menuItemText}>차단</Text>
                       </TouchableOpacity>
                     </>
                   ) : (
                     <>
                       <TouchableOpacity
-                        style={localStyles.menuItem}
+                        style={styles.menuItem}
                         onPress={handleDeleteGroup}
                       >
                         <Text
-                          style={[
-                            localStyles.menuItemText,
-                            { color: "#FF4444" },
-                          ]}
+                          style={[styles.menuItemText, { color: "#FF4444" }]}
                         >
                           그룹 삭제
                         </Text>
@@ -807,27 +804,27 @@ export default function FriendsScreen() {
           onRequestClose={() => setSettingsMenuVisible(false)}
         >
           <Pressable
-            style={localStyles.settingsOverlay}
+            style={styles.settingsOverlay}
             onPress={() => setSettingsMenuVisible(false)}
           >
-            <View style={localStyles.settingsDropdown}>
+            <View style={styles.settingsDropdown}>
               <TouchableOpacity
-                style={localStyles.settingsItem}
+                style={styles.settingsItem}
                 onPress={() => {
                   setSettingsMenuVisible(false);
                   Alert.alert("알림", "친구 관리 기능");
                 }}
               >
-                <Text style={localStyles.settingsItemText}>친구 관리</Text>
+                <Text style={styles.settingsItemText}>친구 관리</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={localStyles.settingsItem}
+                style={styles.settingsItem}
                 onPress={() => {
                   setSettingsMenuVisible(false);
                   Alert.alert("알림", "전체 설정 기능");
                 }}
               >
-                <Text style={localStyles.settingsItemText}>전체 설정</Text>
+                <Text style={styles.settingsItemText}>전체 설정</Text>
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -836,195 +833,3 @@ export default function FriendsScreen() {
     </SafeAreaView>
   );
 }
-
-const PURPLE = "#9997FF";
-const localStyles = StyleSheet.create({
-  headerContainer: {
-    position: "relative",
-    justifyContent: "space-between",
-    alignItems: "center",
-    flexDirection: "row",
-    height: 56,
-  },
-  absoluteTitleContainer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 1,
-  },
-  searchInput: {
-    width: "60%",
-    backgroundColor: "#F5F5F5",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    fontSize: 14,
-    color: "#333",
-  },
-  headerRight: {
-    zIndex: 10,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  friendCountRowInline: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 16,
-  },
-  friendFilterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 4,
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  friendFilterTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: PURPLE,
-    backgroundColor: "#FFFFFF",
-  },
-  friendFilterTabActive: { backgroundColor: PURPLE, borderColor: PURPLE },
-  friendFilterTabText: { fontSize: 13, color: PURPLE, fontWeight: "500" },
-  friendFilterTabTextActive: { color: "#FFFFFF", fontWeight: "600" },
-  friendFilterPlusTab: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  moreButton: {
-    padding: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  menuOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  menuContainer: {
-    width: 250,
-    backgroundColor: "white",
-    borderRadius: 16,
-    paddingVertical: 10,
-    elevation: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-  },
-  menuHeader: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-    marginBottom: 4,
-  },
-  menuTitle: { fontSize: 16, fontWeight: "bold", color: "#333" },
-  menuItem: { paddingVertical: 12, paddingHorizontal: 20 },
-  menuItemText: { fontSize: 15, color: "#444" },
-
-  groupModalContainer: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.25)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  groupModalBox: {
-    width: "80%",
-    maxHeight: "80%",
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    backgroundColor: "#fff",
-  },
-  groupModalTitle: { fontSize: 16, fontWeight: "700", marginBottom: 8 },
-  groupSectionTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  groupItem: { paddingVertical: 6 },
-  groupItemText: { fontSize: 14 },
-  groupDivider: { height: 1, backgroundColor: "#EEE", marginVertical: 8 },
-  groupNameInput: {
-    borderWidth: 1,
-    borderColor: "#E0E0FF",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    fontSize: 14,
-  },
-  groupHintText: {
-    fontSize: 12,
-    color: "#888",
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  groupFriendList: { maxHeight: 160, marginTop: 4, marginBottom: 8 },
-  groupFriendItem: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-  },
-  groupFriendItemSelected: { backgroundColor: "#ECE8FF" },
-  groupFriendItemText: { fontSize: 13, color: "#333" },
-  groupFriendItemTextSelected: { color: "#7B61FF", fontWeight: "600" },
-  groupCreateButton: {
-    marginTop: 4,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "#7B61FF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  groupCreateButtonText: { color: "#fff", fontSize: 14, fontWeight: "600" },
-  groupModalClose: { marginTop: 10, alignSelf: "flex-end" },
-  groupModalCloseText: { fontSize: 13, color: "#7B61FF" },
-  settingsOverlay: {
-    flex: 1,
-    backgroundColor: "transparent",
-  },
-  settingsDropdown: {
-    position: "absolute",
-    top: 50,
-    right: 16,
-    backgroundColor: "white",
-    borderRadius: 8,
-    paddingVertical: 8,
-    minWidth: 150,
-    elevation: 5,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    borderWidth: 1,
-    borderColor: "#eee",
-  },
-  settingsItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  settingsItemText: {
-    fontSize: 15,
-    color: "#333",
-  },
-});
