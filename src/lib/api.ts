@@ -1,5 +1,6 @@
 // src/lib/api.ts
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
+import { Platform } from "react-native";
 
 /** ===============================
  * 커스텀 에러 클래스
@@ -16,25 +17,41 @@ export class ApiError extends Error {
 }
 
 /** ===============================
- * ★ BASE URL 설정
- *
- * 요구사항:
- *  1) API_BASE 는 무조건 환경 변수(process.env.REACT_APP_API_URL)에서 읽는다.
- *  2) 값이 비어 있을 때만 기본값(https://api.zzaptalk.com)을 사용한다.
+ * BASE URL 설정 (최종 완성본)
  * =============================== */
-const envBase = process.env.REACT_APP_API_URL;
+const getBaseUrl = () => {
+  const envBase = process.env.EXPO_PUBLIC_API_BASE;
 
-// 값이 없을 때만 기본값 사용 + 경고 로그
-if (!envBase) {
-  console.warn(
-    "[API] REACT_APP_API_URL is not set. Fallback to https://api.zzaptalk.com"
-  );
-}
+  // 📌 Native(iOS/Android)
+  if (Platform.OS === "ios" || Platform.OS === "android") {
+    if (envBase) return envBase;
+    return "https://api.zzaptalk.com"; // Fallback
+  }
 
-// 교수님이 말한 API_BASE 값
-export const BASE = (envBase || "https://api.zzaptalk.com").replace(/\/+$/, "");
+  // 📌 Web(Docker 빌드 포함)
+  if (Platform.OS === "web") {
+    // 1순위: EXPO_PUBLIC_API_BASE가 있다면 사용
+    if (envBase) return envBase;
 
-console.log(`[API] Base URL: ${BASE}`);
+    let host = "";
+    if (typeof window !== "undefined") host = window.location.hostname;
+
+    // 2순위: 도커 + Nginx 환경 (localhost에서 서비스됨)
+    if (host === "localhost" || host === "127.0.0.1") {
+      return ""; // ★ /api 를 그대로 쓰기 위해 빈 문자열
+    }
+
+    // 3순위: 배포된 웹
+    return "https://api.zzaptalk.com";
+  }
+
+  // 기본값
+  return "https://api.zzaptalk.com";
+};
+
+export const BASE = getBaseUrl().replace(/\/+$/, "");
+
+console.log(`[API] Platform: ${Platform.OS}, BASE: '${BASE}'`);
 
 /** ===============================
  * 전역 토큰 캐시
@@ -59,12 +76,12 @@ export function clearApiAuthToken() {
  * =============================== */
 export const api = axios.create({
   baseURL: BASE || undefined,
-  timeout: 15_000,
+  timeout: 15000,
   headers: { "Content-Type": "application/json" },
 });
 
 /** ===============================
- * 커스텀 필드 확장 (skipAuth)
+ * skipAuth 타입 확장
  * =============================== */
 declare module "axios" {
   export interface AxiosRequestConfig {
@@ -79,17 +96,11 @@ api.interceptors.request.use((config) => {
   const headers = axios.AxiosHeaders.from(config.headers);
   config.headers = headers;
 
-  if (config.skipAuth) {
-    console.log("[REQ]", config.method?.toUpperCase(), config.url, "skipAuth");
-    return config;
-  }
+  if (config.skipAuth) return config;
 
   if (AUTH_TOKEN && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${AUTH_TOKEN}`);
   }
-
-  const hasAuth = headers.get("Authorization") ? "auth✓" : "auth✗";
-  console.log("[REQ]", config.method?.toUpperCase(), config.url, hasAuth);
 
   return config;
 });
@@ -109,15 +120,6 @@ api.interceptors.response.use(
         data?.error ||
         data?.msg ||
         `HTTP ${status}`;
-
-      console.warn(
-        "[RES ERR]",
-        status,
-        err.config?.method?.toUpperCase(),
-        err.config?.url,
-        msg
-      );
-
       return Promise.reject(new ApiError(msg, status, data));
     }
     if (err.request) {
@@ -132,13 +134,13 @@ api.interceptors.response.use(
 );
 
 /** ===============================
- * 공통 요청 메서드
+ * HTTP 메서드 래퍼
  * =============================== */
 export async function get<T>(
   url: string,
   params?: any,
   cfg?: AxiosRequestConfig
-): Promise<T> {
+) {
   const { data } = await api.get<T>(url, { params, ...(cfg || {}) });
   return data;
 }
@@ -147,7 +149,7 @@ export async function post<T>(
   url: string,
   body?: any,
   cfg?: AxiosRequestConfig
-): Promise<T> {
+) {
   const { data } = await api.post<T>(url, body, cfg);
   return data;
 }
@@ -156,15 +158,12 @@ export async function put<T>(
   url: string,
   body?: any,
   cfg?: AxiosRequestConfig
-): Promise<T> {
+) {
   const { data } = await api.put<T>(url, body, cfg);
   return data;
 }
 
-export async function del<T>(
-  url: string,
-  cfg?: AxiosRequestConfig
-): Promise<T> {
+export async function del<T>(url: string, cfg?: AxiosRequestConfig) {
   const { data } = await api.delete<T>(url, cfg);
   return data;
 }
@@ -173,7 +172,7 @@ export async function postText(
   url: string,
   body?: any,
   cfg?: AxiosRequestConfig
-): Promise<string> {
+) {
   const res = await api.post(url, body, {
     responseType: "text",
     transformResponse: (v) => v,
