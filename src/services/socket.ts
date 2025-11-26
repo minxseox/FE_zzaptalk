@@ -4,16 +4,20 @@ import SockJS from "sockjs-client";
 import type { ChatMessageResponse, MessageType } from "../types/chat";
 // ✅ 스토어 임포트
 import { useSocketStore } from "../store/socketStore";
-
+import { Platform } from "react-native";
 /**
  * 🌐 WebSocket Base URL
  * .env 예)
  *   EXPO_PUBLIC_WS_BASE=http://backend:8080/ws        # Docker 내부
  *   EXPO_PUBLIC_WS_BASE=https://api.zzaptalk.com/ws   # 배포 서버
  */
-const WS_BASE = (
-  process.env.EXPO_PUBLIC_WS_BASE || "http://backend:8080/ws"
-).replace(/\/+$/, "");
+const DEFAULT_WS_BASE =
+  Platform.OS === "web" ? "/ws" : "https://api.zzaptalk.com/ws";
+
+const WS_BASE = (process.env.EXPO_PUBLIC_WS_BASE || DEFAULT_WS_BASE).replace(
+  /\/+$/,
+  ""
+);
 
 // 내부 상태
 let client: Client | null = null;

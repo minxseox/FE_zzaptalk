@@ -10,7 +10,7 @@ services:
     environment:
       # 🔥 백엔드는 호스트(네 노트북)의 8080 포트로 간다
       - API_URL=http://host.docker.internal:8080
-
+      - WS_URL=http://host.docker.internal:8080/ws
     extra_hosts:
       # 🔥 윈도우/도커에서 host.docker.internal 주소를 확실히 인식시키기
       - "host.docker.internal:host-gateway"
