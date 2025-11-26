@@ -15,7 +15,7 @@ RUN npx expo export -p web
 # --------------------------
 FROM nginx:alpine
 
-# 루트의 nginx.conf 를 템플릿으로 사용
+# 🔥 루트의 nginx.conf를 템플릿으로 사용
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 # 빌드된 정적 파일 복사
