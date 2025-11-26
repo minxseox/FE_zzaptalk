@@ -9,6 +9,9 @@ import type {
   AddFriendToGroupRequestDto,
 } from "../types/friends";
 
+// ✅ 차단 타입 정의 (UI에서 import해서 쓸 수 있도록 export)
+export type BlockType = "MESSAGE_ONLY" | "MESSAGE_AND_PROFILE" | "NONE";
+
 /**
  * 친구 목록 조회
  * GET /api/v1/friends
@@ -39,7 +42,7 @@ export async function addFriend(payload: AddFriendPayload): Promise<string> {
   }
 }
 
-/** * 친구 삭제 (스크린샷 O)
+/**
  * DELETE /api/v1/friends/{friendId}
  */
 export async function deleteFriend(friendId: number): Promise<void> {
@@ -54,7 +57,7 @@ export async function deleteFriend(friendId: number): Promise<void> {
   }
 }
 
-/** * ✅ [추가] 친구 검색 (스크린샷 O)
+/**
  * GET /api/v1/friends/search?keyword=...
  */
 export async function searchFriends(
@@ -71,7 +74,7 @@ export async function searchFriends(
   }
 }
 
-/** * ✅ [추가] 친구 프로필 조회 (스크린샷 O)
+/**
  * GET /api/v1/friends/{friendId}/profile
  */
 export async function getFriendProfile(friendId: number): Promise<any> {
@@ -84,7 +87,7 @@ export async function getFriendProfile(friendId: number): Promise<any> {
   }
 }
 
-/** * ✅ [추가] 친구 설정 변경 (즐겨찾기 등) (스크린샷 O)
+/**
  * PUT /api/v1/friends
  */
 export async function updateFriendSetting(payload: {
@@ -99,7 +102,7 @@ export async function updateFriendSetting(payload: {
   }
 }
 
-/** * ✅ [추가] 주소록 동기화 (스크린샷 O)
+/*
  * POST /api/v1/friends/sync-contacts
  */
 export async function syncContacts(contacts: any[]): Promise<void> {
@@ -177,6 +180,62 @@ export async function deleteFriendGroup(
   try {
     const res = await api.delete<string>(`/api/v1/friends/groups/${groupId}`);
     return res.data;
+  } catch (err) {
+    const e = err as AxiosError;
+    throw new ApiError(e.message, e.response?.status ?? 500, e.response?.data);
+  }
+}
+
+// --- ✅ [추가] 친구 차단 관련 API ---
+
+/**
+ * 친구 차단
+ * POST /api/v1/friends/block
+ */
+export async function blockFriend(
+  blockedUserId: number,
+  blockType: BlockType
+): Promise<void> {
+  try {
+    await api.post("/api/v1/friends/block", {
+      blockedUserId,
+      blockType,
+    });
+  } catch (err) {
+    const e = err as AxiosError;
+    throw new ApiError(e.message, e.response?.status ?? 500, e.response?.data);
+  }
+}
+
+/**
+ * 차단한 친구 목록 조회
+ * GET /api/v1/friends/block
+ */
+export async function getBlockedFriends(): Promise<any[]> {
+  try {
+    // 응답 DTO가 명세되어 있지 않아 any[]로 처리했습니다.
+    // 추후 차단 목록 데이터 구조가 확정되면 타입을 변경하세요.
+    const res = await api.get<any[]>("/api/v1/friends/block");
+    return res.data;
+  } catch (err) {
+    const e = err as AxiosError;
+    throw new ApiError(e.message, e.response?.status ?? 500, e.response?.data);
+  }
+}
+
+/**
+ * 차단 설정 변경 (해제 포함)
+ * PUT /api/v1/friends/block
+ */
+export async function updateBlockFriend(
+  blockedUserId: number,
+  blockType: BlockType
+): Promise<void> {
+  try {
+    await api.put("/api/v1/friends/block", {
+      blockedUserId,
+      blockType,
+    });
   } catch (err) {
     const e = err as AxiosError;
     throw new ApiError(e.message, e.response?.status ?? 500, e.response?.data);

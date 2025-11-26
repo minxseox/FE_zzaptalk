@@ -1,4 +1,3 @@
-// app/(tabs)/friends/index.tsx
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -12,6 +11,7 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
+  TouchableWithoutFeedback,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -28,6 +28,7 @@ import {
   createFriendGroup,
   addFriendToGroup,
   deleteFriendGroup,
+  blockFriend, // ✅ [추가] 차단 API 함수 임포트
 } from "../../../src/services/friends";
 import { fetchMyProfile } from "../../../src/services/profile";
 import type { FriendListResponseDto } from "../../../src/types/friends";
@@ -181,10 +182,16 @@ export default function FriendsScreen() {
     }
   };
 
-  const handleLongPressFriend = (friend: Friend) => {
+  // 점 3개 메뉴 오픈 (친구)
+  const handleOpenFriendMenu = (friend: Friend) => {
     setMenuType("FRIEND");
     setSelectedFriend(friend);
     setMenuVisible(true);
+  };
+
+  // 기존 LongPress 호환 (필요 시)
+  const handleLongPressFriend = (friend: Friend) => {
+    handleOpenFriendMenu(friend);
   };
 
   const handleLongPressGroup = (group: FriendGroup) => {
@@ -240,9 +247,36 @@ export default function FriendsScreen() {
     ]);
   };
 
+  // 차단 기능 연결
   const handleBlockFriend = () => {
+    if (!selectedFriend) return;
     setMenuVisible(false);
-    Alert.alert("알림", "기능 준비 중입니다.");
+
+    Alert.alert(
+      "차단",
+      `'${selectedFriend.name}'님을 차단하시겠습니까?\n차단하면 메시지와 프로필이 보이지 않게 됩니다.`,
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "차단",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // 1. 차단 API 호출 (타입: MESSAGE_AND_PROFILE)
+              await blockFriend(selectedFriend.id, "MESSAGE_AND_PROFILE");
+
+              // 2. 친구 목록 새로고침 (차단된 친구 사라짐)
+              await loadFriends();
+
+              Alert.alert("알림", "차단되었습니다.");
+            } catch (e) {
+              console.error(e);
+              Alert.alert("오류", "차단에 실패했습니다.");
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleDeleteGroup = () => {
@@ -489,35 +523,47 @@ export default function FriendsScreen() {
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.friendList}
           renderItem={({ item }) => (
-            <Pressable
-              style={styles.friendRow}
-              onLongPress={() => handleLongPressFriend(item)}
+            <View
+              style={[styles.friendRow, { justifyContent: "space-between" }]}
             >
-              <View style={styles.friendAvatar}>
-                <Text style={styles.friendAvatarInitial}>
-                  {item.name.charAt(0)}
+              {/* 왼쪽: 프로필 사진 + 이름 영역 (누르면 프로필 이동 등 확장 가능) */}
+              <Pressable
+                style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
+                onLongPress={() => handleLongPressFriend(item)}
+              >
+                <View style={styles.friendAvatar}>
+                  <Text style={styles.friendAvatarInitial}>
+                    {item.name.charAt(0)}
+                  </Text>
+                </View>
+                <Text style={styles.friendName}>
+                  {item.name}
+                  {item.isFavorite && (
+                    <Text style={{ color: "#FFD700" }}> ★</Text>
+                  )}
                 </Text>
-              </View>
-              <Text style={styles.friendName}>
-                {item.name}
-                {item.isFavorite && (
-                  <Text style={{ color: "#FFD700" }}> ★</Text>
-                )}
-              </Text>
-            </Pressable>
+              </Pressable>
+
+              {/* 오른쪽: 점 3개 메뉴 버튼 */}
+              <TouchableOpacity
+                style={localStyles.moreButton}
+                onPress={() => handleOpenFriendMenu(item)}
+              >
+                <Ionicons name="ellipsis-vertical" size={20} color="#ccc" />
+              </TouchableOpacity>
+            </View>
           )}
         />
 
         {/* ============ MODALS ============ */}
 
-        {/* ✅ [수정] 친구 추가 모달 (Pressable 구조로 변경하여 입력 문제 해결) */}
+        {/* 1. 친구 추가 모달 */}
         <Modal
           visible={addVisible}
           transparent
           animationType="fade"
           onRequestClose={() => setAddVisible(false)}
         >
-          {/* 배경 누르면 닫기 */}
           <Pressable
             style={modalStyles.modalOverlay}
             onPress={() => {
@@ -525,7 +571,6 @@ export default function FriendsScreen() {
               setAddVisible(false);
             }}
           >
-            {/* 내부 컨텐츠 (이벤트 전파 방지) */}
             <Pressable
               style={modalStyles.modalContainer}
               onPress={(e) => e.stopPropagation()}
@@ -690,60 +735,68 @@ export default function FriendsScreen() {
           animationType="fade"
           onRequestClose={() => setMenuVisible(false)}
         >
-          <Pressable
-            style={localStyles.menuOverlay}
-            onPress={() => setMenuVisible(false)}
-          >
-            <View style={localStyles.menuContainer}>
-              <View style={localStyles.menuHeader}>
-                <Text style={localStyles.menuTitle}>
-                  {menuType === "FRIEND"
-                    ? selectedFriend?.name
-                    : selectedGroup?.name}
-                </Text>
-              </View>
+          {/* 모달 바깥 터치시 닫기 */}
+          <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
+            <View style={localStyles.menuOverlay}>
+              {/* 메뉴 박스 내부 터치시 닫기 방지 */}
+              <TouchableWithoutFeedback>
+                <View style={localStyles.menuContainer}>
+                  {/* 상단 이름 영역 */}
+                  <View style={localStyles.menuHeader}>
+                    <Text style={localStyles.menuTitle}>
+                      {menuType === "FRIEND"
+                        ? selectedFriend?.name
+                        : selectedGroup?.name}
+                    </Text>
+                  </View>
 
-              {menuType === "FRIEND" ? (
-                <>
-                  <TouchableOpacity
-                    style={localStyles.menuItem}
-                    onPress={handleToggleFavorite}
-                  >
-                    <Text style={localStyles.menuItemText}>
-                      {selectedFriend?.isFavorite
-                        ? "즐겨찾기 해제"
-                        : "즐겨찾기 추가"}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={localStyles.menuItem}
-                    onPress={handleDeleteFriend}
-                  >
-                    <Text style={localStyles.menuItemText}>삭제</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={localStyles.menuItem}
-                    onPress={handleBlockFriend}
-                  >
-                    <Text style={localStyles.menuItemText}>차단</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    style={localStyles.menuItem}
-                    onPress={handleDeleteGroup}
-                  >
-                    <Text
-                      style={[localStyles.menuItemText, { color: "#FF4444" }]}
-                    >
-                      그룹 삭제
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              )}
+                  {menuType === "FRIEND" ? (
+                    <>
+                      <TouchableOpacity
+                        style={localStyles.menuItem}
+                        onPress={handleToggleFavorite}
+                      >
+                        <Text style={localStyles.menuItemText}>
+                          {selectedFriend?.isFavorite
+                            ? "즐겨찾기 해제"
+                            : "즐겨찾기 추가"}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={localStyles.menuItem}
+                        onPress={handleDeleteFriend}
+                      >
+                        <Text style={localStyles.menuItemText}>삭제</Text>
+                      </TouchableOpacity>
+                      {/* ✅ [연결] 차단 버튼 */}
+                      <TouchableOpacity
+                        style={localStyles.menuItem}
+                        onPress={handleBlockFriend}
+                      >
+                        <Text style={localStyles.menuItemText}>차단</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        style={localStyles.menuItem}
+                        onPress={handleDeleteGroup}
+                      >
+                        <Text
+                          style={[
+                            localStyles.menuItemText,
+                            { color: "#FF4444" },
+                          ]}
+                        >
+                          그룹 삭제
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
+              </TouchableWithoutFeedback>
             </View>
-          </Pressable>
+          </TouchableWithoutFeedback>
         </Modal>
 
         {/* 4. 우측 상단 설정 드롭다운 메뉴 */}
@@ -791,7 +844,7 @@ const localStyles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     flexDirection: "row",
-    height: 56, // 높이 명시
+    height: 56,
   },
   absoluteTitleContainer: {
     position: "absolute",
@@ -801,7 +854,7 @@ const localStyles = StyleSheet.create({
     bottom: 0,
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 1, // 레이어 순서 하단
+    zIndex: 1,
   },
   searchInput: {
     width: "60%",
@@ -813,7 +866,7 @@ const localStyles = StyleSheet.create({
     color: "#333",
   },
   headerRight: {
-    zIndex: 10, // 레이어 순서 상단 (버튼 클릭 가능하도록)
+    zIndex: 10,
     flexDirection: "row",
     alignItems: "center",
   },
@@ -853,29 +906,41 @@ const localStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
+  moreButton: {
+    padding: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
   menuOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.2)",
     justifyContent: "center",
     alignItems: "center",
   },
   menuContainer: {
     width: 250,
     backgroundColor: "white",
-    borderRadius: 12,
+    borderRadius: 16,
     paddingVertical: 10,
-    elevation: 5,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
   },
   menuHeader: {
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-    marginBottom: 5,
+    borderBottomColor: "#f0f0f0",
+    marginBottom: 4,
   },
   menuTitle: { fontSize: 16, fontWeight: "bold", color: "#333" },
   menuItem: { paddingVertical: 12, paddingHorizontal: 20 },
-  menuItemText: { fontSize: 15, color: "#333" },
+  menuItemText: { fontSize: 15, color: "#444" },
+
   groupModalContainer: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.25)",

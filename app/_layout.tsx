@@ -24,7 +24,7 @@ const norm = (p: string) => {
 };
 
 // 🔥 서버 안 돌아갈 때만 true 로 두기 (나중에 꼭 false/삭제)
-const DEV_BYPASS_AUTH = false;
+const DEV_BYPASS_AUTH = true;
 
 export default function RootLayout() {
   const router = useRouter();
