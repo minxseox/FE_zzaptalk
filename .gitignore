@@ -72,3 +72,4 @@ lerna-debug.log*
 # EXAMPLES / MISC
 # =========================
 app-example/
+dist/

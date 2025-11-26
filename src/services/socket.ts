@@ -1,13 +1,18 @@
 // src/services/socket.ts
-import { Client, IMessage, StompHeaders } from "@stomp/stompjs";
+import { Client, IMessage } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import type { ChatMessageResponse, MessageType } from "../types/chat";
-// ✅ 스토어 임포트 추가
+// ✅ 스토어 임포트
 import { useSocketStore } from "../store/socketStore";
 
-// .env 예) EXPO_PUBLIC_WS_BASE=https://api.zzaptalk.com/ws-stomp
+/**
+ * 🌐 WebSocket Base URL
+ * .env 예)
+ *   EXPO_PUBLIC_WS_BASE=http://backend:8080/ws        # Docker 내부
+ *   EXPO_PUBLIC_WS_BASE=https://api.zzaptalk.com/ws   # 배포 서버
+ */
 const WS_BASE = (
-  process.env.EXPO_PUBLIC_WS_BASE || "https://api.zzaptalk.com/ws"
+  process.env.EXPO_PUBLIC_WS_BASE || "http://backend:8080/ws"
 ).replace(/\/+$/, "");
 
 // 내부 상태
@@ -15,12 +20,14 @@ let client: Client | null = null;
 // 연결 상태를 Promise로 관리 (연결 완료 대기용)
 let connectionPromise: Promise<void> | null = null;
 
-// 날짜 변환 유틸
+/* ============================
+ *  날짜 변환 유틸
+ * ============================ */
 function toIso(v?: any): string {
   if (!v) return new Date().toISOString();
   if (v instanceof Date) return v.toISOString();
   if (typeof v === "number") {
-    const ms = v < 1e12 ? v * 1000 : v;
+    const ms = v < 1e12 ? v * 1000 : v; // 초 단위 or ms 단위
     return new Date(ms).toISOString();
   }
   const n = Number(v);
@@ -31,7 +38,9 @@ function toIso(v?: any): string {
   return new Date(v).toISOString();
 }
 
-// 데이터 정규화
+/* ============================
+ *  데이터 정규화
+ * ============================ */
 function normalize(body: any): ChatMessageResponse {
   const msgId =
     typeof body?.messageId === "number" || typeof body?.messageId === "string"
@@ -64,37 +73,52 @@ function normalize(body: any): ChatMessageResponse {
   };
 }
 
-// ✅ 1. 소켓 연결 (구독 X, 연결만 O)
+/* ============================
+ *  1. 소켓 연결 (전역 1회)
+ *     - 구독은 별도 함수에서
+ * ============================ */
 export function connectStomp(token: string): Promise<void> {
-  // 이미 연결되어 있거나 연결 중이면 기존 Promise 반환
+  // 이미 연결되어 있으면 바로 resolve
   if (client?.connected) return Promise.resolve();
+  // 이미 연결 시도 중이면 기존 Promise 재사용
   if (connectionPromise) return connectionPromise;
 
   connectionPromise = new Promise((resolve, reject) => {
     client = new Client({
-      webSocketFactory: () => new SockJS(WS_BASE || "/ws-stomp"),
+      // ✅ 백엔드가 알려준 엔드포인트: /ws
+      webSocketFactory: () => new SockJS(WS_BASE || "/ws"),
+
+      // ✅ JWT 헤더
       connectHeaders: {
         Authorization: `Bearer ${token}`,
       },
 
+      // 디버깅 옵션 (필요시 주석 해제)
+      // debug: (msg) => console.log("[STOMP]", msg),
+
       onConnect: () => {
         console.log("✅ STOMP Connected! (Global)");
-        // ✅ 전역 상태 업데이트: 연결됨
         useSocketStore.getState().setConnected(true);
         resolve();
       },
+
       onStompError: (frame) => {
-        console.error("❌ STOMP Error", frame.headers["message"]);
-        // ✅ 전역 상태 업데이트: 끊김
+        console.error("❌ STOMP Error:", frame.headers["message"]);
         useSocketStore.getState().setConnected(false);
+        connectionPromise = null;
         reject(new Error(frame.headers["message"]));
-        connectionPromise = null; // 에러 나면 초기화
       },
+
       onWebSocketClose: () => {
         console.log("🔌 WebSocket Closed");
-        // ✅ 전역 상태 업데이트: 끊김
         useSocketStore.getState().setConnected(false);
-        connectionPromise = null; // 닫히면 초기화
+        connectionPromise = null;
+      },
+
+      onWebSocketError: (event) => {
+        console.error("⚠️ WebSocket Error:", event);
+        useSocketStore.getState().setConnected(false);
+        connectionPromise = null;
       },
     });
 
@@ -104,7 +128,10 @@ export function connectStomp(token: string): Promise<void> {
   return connectionPromise;
 }
 
-// ✅ 2. 채팅방 구독 (이게 분리되어야 함!)
+/* ============================
+ *  2. 채팅방 구독
+ *     - 방 나갈 때 반환된 함수로 unsubscribe
+ * ============================ */
 export function subscribeRoom(
   roomId: number,
   onMessage: (msg: ChatMessageResponse) => void
@@ -114,42 +141,51 @@ export function subscribeRoom(
     return () => {};
   }
 
-  // 백엔드가 알려준 구독 경로: /topic/chatlist.{roomId}
-  const subscription = client.subscribe(
-    `/topic/chatlist.${roomId}`,
-    (frame: IMessage) => {
-      try {
-        const body = JSON.parse(frame.body);
-        onMessage(normalize(body));
-      } catch (e) {
-        console.error("Json Parse Error:", e);
-      }
-    }
-  );
+  /**
+   * ✅ 백엔드 최종 구독 경로
+   *  - Subscribe Prefix : /topic
+   *  - 최종 경로        : /topic/chat/room/{roomId}
+   */
+  const destination = `/topic/chat/room/${roomId}`;
 
-  // 구독 취소 함수 반환 (useEffect의 return에서 사용됨)
+  const subscription = client.subscribe(destination, (frame: IMessage) => {
+    try {
+      const body = JSON.parse(frame.body);
+      onMessage(normalize(body));
+    } catch (e) {
+      console.error("❌ JSON Parse Error:", e);
+    }
+  });
+
+  // 구독 해제 함수 반환 → useEffect cleanup에서 사용
   return () => subscription.unsubscribe();
 }
 
-// ✅ 3. 연결 해제
+/* ============================
+ *  3. 연결 해제
+ * ============================ */
 export function disconnectStomp() {
   if (client) {
     client.deactivate();
     client = null;
     connectionPromise = null;
-    // ✅ 전역 상태 업데이트: 끊김
     useSocketStore.getState().setConnected(false);
+    console.log("🔴 STOMP Disconnected");
   }
 }
 
-// ✅ 4. 메시지 전송
+/* ============================
+ *  4. 메시지 전송
+ * ============================ */
 export async function sendChatMessage(
   roomId: number,
-  senderId: number, // 백엔드 DTO엔 없지만 호환성 위해 받음
+  _senderId: number, // 현재 백엔드 DTO에는 불필요하지만, 기존 시그니처 유지
   content: string,
   type: MessageType = "TEXT"
 ) {
-  if (!client || !client.connected) throw new Error("STOMP not connected");
+  if (!client || !client.connected) {
+    throw new Error("STOMP not connected");
+  }
 
   const payload = {
     roomId,
@@ -157,6 +193,11 @@ export async function sendChatMessage(
     type,
   };
 
+  /**
+   * ✅ 백엔드 최종 Publish 정보
+   *  - Publish Prefix : /app
+   *  - 최종 경로      : /app/chat/message
+   */
   client.publish({
     destination: "/app/chat/message",
     headers: { "Content-Type": "application/json" },
