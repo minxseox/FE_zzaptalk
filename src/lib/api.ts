@@ -1,8 +1,9 @@
 // src/lib/api.ts
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
+import { Platform } from "react-native"; // ★ 추가됨: 플랫폼 확인용
 
 /** ===============================
- *  커스텀 에러 클래스
+ * 커스텀 에러 클래스
  * =============================== */
 export class ApiError extends Error {
   status: number;
@@ -16,19 +17,32 @@ export class ApiError extends Error {
 }
 
 /** ===============================
- *  BASE URL (.env)
+ * ★ BASE URL 설정 (핵심 수정 부분)
  * =============================== */
-const rawBase = process.env.EXPO_PUBLIC_API_BASE || "https://api.zzaptalk.com";
-if (!rawBase) {
-  // eslint-disable-next-line no-console
-  console.warn(
-    "[API] EXPO_PUBLIC_API_BASE is missing! Check your .env or Cloudflare settings."
-  );
-}
-export const BASE = rawBase.replace(/\/+$/, "");
+const getBaseUrl = () => {
+  // 1. .env에 강제로 설정된 값이 있으면 최우선 사용
+  if (process.env.EXPO_PUBLIC_API_BASE) {
+    return process.env.EXPO_PUBLIC_API_BASE;
+  }
+
+  // 2. 웹(Web) 환경일 때 -> Docker/Nginx 환경 대응
+  if (Platform.OS === "web") {
+    // '/api'로 설정하면 브라우저는 'http://현재도메인/api'로 요청을 보냅니다.
+    // 이걸 Nginx가 받아서 'http://backend:8080'으로 넘겨주게 됩니다. (CORS 해결)
+    return "/api";
+  }
+
+  // 3. 앱(App) 환경일 때 -> 로컬 개발 대응
+  // ⚠️ 핸드폰 테스트 시 본인의 PC IP 주소로 변경해주세요. (예: 192.168.0.5)
+  return "http://192.168.0.XX:8080";
+};
+
+export const BASE = getBaseUrl().replace(/\/+$/, "");
+
+console.log(`[API] Environment: ${Platform.OS}, Base URL: ${BASE}`);
 
 /** ===============================
- *  전역 토큰 캐시
+ * 전역 토큰 캐시
  * =============================== */
 let AUTH_TOKEN: string | null = null;
 
@@ -45,7 +59,7 @@ export function clearApiAuthToken() {
 }
 
 /** ===============================
- *  Axios 인스턴스
+ * Axios 인스턴스
  * =============================== */
 export const api = axios.create({
   baseURL: BASE || undefined,
@@ -54,7 +68,7 @@ export const api = axios.create({
 });
 
 /** ===============================
- *  커스텀 필드 확장 (skipAuth)
+ * 커스텀 필드 확장 (skipAuth)
  * =============================== */
 declare module "axios" {
   export interface AxiosRequestConfig {
@@ -63,25 +77,21 @@ declare module "axios" {
 }
 
 /** ===============================
- *  요청 인터셉터
+ * 요청 인터셉터
  * =============================== */
 api.interceptors.request.use((config) => {
   const headers = axios.AxiosHeaders.from(config.headers);
   config.headers = headers;
 
-  // 로그인/회원가입 등 인증 불필요 요청은 바로 진행
   if (config.skipAuth) {
-    // 🔍 디버그: 인증 생략되는 요청 표시
     console.log("[REQ]", config.method?.toUpperCase(), config.url, "skipAuth");
     return config;
   }
 
-  // Authorization 자동 부착
   if (AUTH_TOKEN && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${AUTH_TOKEN}`);
   }
 
-  // 🔍 디버그: 매 요청마다 토큰 부착 여부 출력 (auth✓ / auth✗)
   const hasAuth = headers.get("Authorization") ? "auth✓" : "auth✗";
   console.log("[REQ]", config.method?.toUpperCase(), config.url, hasAuth);
 
@@ -89,7 +99,7 @@ api.interceptors.request.use((config) => {
 });
 
 /** ===============================
- *  응답 인터셉터 (에러 표준화)
+ * 응답 인터셉터
  * =============================== */
 api.interceptors.response.use(
   (res) => res,
@@ -104,7 +114,6 @@ api.interceptors.response.use(
         data?.msg ||
         `HTTP ${status}`;
 
-      // 🔍 디버그: 에러 로그 한 번 더 남기기
       console.warn(
         "[RES ERR]",
         status,
@@ -127,7 +136,7 @@ api.interceptors.response.use(
 );
 
 /** ===============================
- *  공통 요청 메서드
+ * 공통 요청 메서드
  * =============================== */
 export async function get<T>(
   url: string,
@@ -164,9 +173,6 @@ export async function del<T>(
   return data;
 }
 
-/** ===============================
- *  text/plain 응답용
- * =============================== */
 export async function postText(
   url: string,
   body?: any,
@@ -179,5 +185,3 @@ export async function postText(
   });
   return res.data as string;
 }
-
-console.log("[API] BASE =", BASE || "(empty)");
