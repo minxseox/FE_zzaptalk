@@ -1,6 +1,6 @@
 // src/lib/api.ts
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
-import { Platform } from "react-native"; // ★ 추가됨: 플랫폼 확인용
+import { Platform } from "react-native";
 
 /** ===============================
  * 커스텀 에러 클래스
@@ -17,24 +17,27 @@ export class ApiError extends Error {
 }
 
 /** ===============================
- * ★ BASE URL 설정 (핵심 수정 부분)
+ * ★ BASE URL 설정 (수정 완료)
+ * - 1순위: 환경변수 (.env)
+ * - 2순위: 웹일 경우 Nginx Proxy (/api)
+ * - 3순위: 앱일 경우 실서버 주소 (기본값)
  * =============================== */
 const getBaseUrl = () => {
-  // 1. .env에 강제로 설정된 값이 있으면 최우선 사용
+  // 1. 환경 변수가 있으면 무조건 최우선으로 사용합니다.
+  // (로컬 개발 시 내 PC IP를 .env에 적으면 여기서 걸립니다.)
   if (process.env.EXPO_PUBLIC_API_BASE) {
     return process.env.EXPO_PUBLIC_API_BASE;
   }
 
-  // 2. 웹(Web) 환경일 때 -> Docker/Nginx 환경 대응
+  // 2. 환경 변수가 없고 + 웹(Web) 환경일 때
+  // Docker/Nginx 환경에서는 '/api' 상대 경로를 사용해야 프록시가 작동합니다.
   if (Platform.OS === "web") {
-    // '/api'로 설정하면 브라우저는 'http://현재도메인/api'로 요청을 보냅니다.
-    // 이걸 Nginx가 받아서 'http://backend:8080'으로 넘겨주게 됩니다. (CORS 해결)
     return "/api";
   }
 
-  // 3. 앱(App) 환경일 때 -> 로컬 개발 대응
-  // ⚠️ 핸드폰 테스트 시 본인의 PC IP 주소로 변경해주세요. (예: 192.168.0.5)
-  return "http://192.168.0.XX:8080";
+  // 3. 환경 변수가 없고 + 앱(App) 환경일 때
+  // 백엔드 개발자 요청대로 "배포 주소"를 기본값으로 설정합니다.
+  return "https://api.zzaptalk.com";
 };
 
 export const BASE = getBaseUrl().replace(/\/+$/, "");
