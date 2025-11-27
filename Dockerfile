@@ -4,8 +4,10 @@ COPY package.json package-lock.json ./
 RUN npm install
 COPY . .
 
-# 🔥 핵심: production 환경 변수 적용
-COPY .env.production .env
+# 🔥 .env 파일 직접 생성
+RUN echo "EXPO_PUBLIC_API_BASE=/api" > .env && \
+    echo "EXPO_PUBLIC_WS_BASE=/ws" >> .env && \
+    echo "EXPO_PUBLIC_APP_ENV=production" >> .env
 
 RUN npx expo export -p web
 
