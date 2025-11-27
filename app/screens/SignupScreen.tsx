@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { signup } from "../../src/services/auth";
 import styles from "../../src/styles/loginsignup/Signup.module";
+import SignupTermsModal from "../../src/components/SignupTermsModal"; // ✅ 추가
 
 const formatPhone = (raw: string) => {
   const only = raw.replace(/\D/g, "").slice(0, 11);
@@ -36,6 +37,9 @@ export default function SignupScreen() {
   const [rrnBack1, setRrnBack1] = useState("");
   const [phone, setPhone] = useState("");
   const [loadingSignup, setLoadingSignup] = useState(false);
+
+  // ✅ 약관 모달 ON/OFF
+  const [showTermsModal, setShowTermsModal] = useState(false);
 
   const pwdOk = pwd.length >= 8;
   const pwdSame = pwd.length > 0 && pwd === pwd2;
@@ -60,24 +64,33 @@ export default function SignupScreen() {
   const onChangeRrnBack1 = (v: string) =>
     setRrnBack1(onlyDigits(v).slice(0, 1));
 
-  const onSubmit = async () => {
+  // 공통 검증 함수
+  const validate = () => {
+    if (loadingSignup) return false;
+
+    const msgs: string[] = [];
+    if (name.trim().length < 2) msgs.push("이름");
+    if (!pwdOk) msgs.push("비밀번호(8자 이상)");
+    if (!pwdSame) msgs.push("비밀번호 확인 일치");
+    if (!rrnFrontOk) msgs.push("주민번호 앞 6자리");
+    if (!rrnBack1Ok) msgs.push("주민번호 뒤 첫 1자리");
+    if (!phoneOk) msgs.push("전화번호");
+
+    if (msgs.length > 0) {
+      Alert.alert("입력 확인", `${msgs.join(", ")}을(를) 확인해 주세요.`);
+      return false;
+    }
+    return true;
+  };
+
+  // 실제 회원가입 API 호출
+  const handleSignupCore = async () => {
     Keyboard.dismiss();
     if (Platform.OS === "web" && typeof document !== "undefined") {
       (document.activeElement as HTMLElement | null)?.blur?.();
     }
-    if (loadingSignup) return;
 
-    if (!canSubmit) {
-      const msgs: string[] = [];
-      if (name.trim().length < 2) msgs.push("이름");
-      if (!pwdOk) msgs.push("비밀번호(8자 이상)");
-      if (!pwdSame) msgs.push("비밀번호 확인 일치");
-      if (!rrnFrontOk) msgs.push("주민번호 앞 6자리");
-      if (!rrnBack1Ok) msgs.push("주민번호 뒤 첫 1자리");
-      if (!phoneOk) msgs.push("전화번호");
-      Alert.alert("입력 확인", `${msgs.join(", ")}을(를) 확인해 주세요.`);
-      return;
-    }
+    if (!validate()) return;
 
     const payload = {
       phoneNum: phone.replace(/\D/g, ""),
@@ -88,7 +101,7 @@ export default function SignupScreen() {
 
     try {
       setLoadingSignup(true);
-      await signup(payload); // 서버: text/plain 메시지
+      await signup(payload);
       Keyboard.dismiss();
       if (Platform.OS === "web" && typeof document !== "undefined") {
         (document.activeElement as HTMLElement | null)?.blur?.();
@@ -100,6 +113,17 @@ export default function SignupScreen() {
     } finally {
       setLoadingSignup(false);
     }
+  };
+
+  // 🔘 버튼 눌렀을 때: 입력 검증 → 모달 띄우기
+  const onSubmit = () => {
+    Keyboard.dismiss();
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    }
+
+    if (!validate()) return;
+    setShowTermsModal(true);
   };
 
   return (
@@ -273,6 +297,16 @@ export default function SignupScreen() {
             </Text>
           </Pressable>
         </ScrollView>
+
+        {/* 🔽 약관 동의 모달 */}
+        <SignupTermsModal
+          visible={showTermsModal}
+          onClose={() => setShowTermsModal(false)}
+          onConfirm={() => {
+            setShowTermsModal(false);
+            handleSignupCore();
+          }}
+        />
       </SafeAreaView>
     </KeyboardAvoidingView>
   );

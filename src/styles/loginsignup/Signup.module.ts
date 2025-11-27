@@ -17,6 +17,11 @@ export default StyleSheet.create({
     marginBottom: 10,
     position: "relative",
   },
+  scrollPad: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 40,
+  },
 
   // 뒤로가기 버튼
   backAbs: {
