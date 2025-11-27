@@ -7,7 +7,6 @@ RUN npm install
 
 COPY . .
 
-# Expo Web 빌드 (dist 폴더 생성)
 RUN npx expo export -p web
 
 # --------------------------
@@ -15,16 +14,17 @@ RUN npx expo export -p web
 # --------------------------
 FROM nginx:alpine
 
-# 템플릿으로 사용할 설정 파일 복사
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+# 템플릿 파일 복사 (templates 폴더가 아닌 임시 위치로!)
+COPY nginx.conf /etc/nginx/nginx.conf.template
 
 # 빌드된 정적 파일 복사
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# 🔥 핵심: 치환할 환경 변수만 명시 (NGINX 내장 변수 보호)
-ENV NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d
-ENV NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
-ENV NGINX_ENVSUBST_FILTER=API_URL,WS_URL
+# 🔥 핵심: 직접 envsubst 실행하는 entrypoint 스크립트 생성
+RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
+    echo 'envsubst "\$API_URL \$WS_URL" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf' >> /docker-entrypoint.sh && \
+    echo 'exec nginx -g "daemon off;"' >> /docker-entrypoint.sh && \
+    chmod +x /docker-entrypoint.sh
 
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
