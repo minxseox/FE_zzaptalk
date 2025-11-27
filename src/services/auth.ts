@@ -50,7 +50,7 @@ export async function signup(payload: SignupPayload): Promise<void> {
   const body = { phoneNum: phone, pwd, name, rrn };
 
   // 인증 불필요 엔드포인트이므로 skipAuth 지정
-  await post("/api/v1/users/signup", body, { skipAuth: true });
+  await post("/v1/users/signup", body, { skipAuth: true });
 }
 
 /* =========================
@@ -83,7 +83,7 @@ export async function login(payload: LoginPayload): Promise<string> {
   else body.zzapID = zzapID;
 
   // 인증 불필요 엔드포인트 → skipAuth:true
-  const res = (await post<AuthLoginResponse>("/api/v1/users/login", body, {
+  const res = (await post<AuthLoginResponse>("/v1/users/login", body, {
     skipAuth: true,
   })) as AuthLoginResponse;
 
