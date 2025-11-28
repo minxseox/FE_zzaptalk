@@ -11,9 +11,7 @@ import { useFonts } from "expo-font";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import "../global-icons.css";
 
-// 기존 라이브러리 Import
 import { restoreSession, onAuthChange } from "../src/lib/authSession";
-//  추가: 토큰 가져오기 및 소켓 함수 Import
 import { loadTokenWithExpiry } from "../src/lib/authStorage";
 import { connectStomp, disconnectStomp } from "../src/services/socket";
 
@@ -23,7 +21,7 @@ const norm = (p: string) => {
   return q === "/" ? "/" : q.replace(/\/+$/, "");
 };
 
-// 🔥 서버 안 돌아갈 때만 true 로 두기 (나중에 꼭 false/삭제)
+// 개발용 우회 (나중에 실제 배포 시 false 또는 제거)
 const DEV_BYPASS_AUTH = true;
 
 export default function RootLayout() {
@@ -39,6 +37,9 @@ export default function RootLayout() {
   const [fontsLoaded] = useFonts(
     isWeb ? {} : { ...Ionicons.font, ...MaterialIcons.font }
   );
+
+  // ✅ 소켓 초기화 여부 (중복 연결 방지)
+  const socketInitializedRef = useRef(false);
 
   // 웹 포커스 처리
   useEffect(() => {
@@ -58,7 +59,6 @@ export default function RootLayout() {
       setReady(true);
     })();
 
-    // 로그인 상태가 바뀌면(로그인/로그아웃) loggedIn 업데이트
     const off = onAuthChange((v) => setLoggedIn(v));
     return () => {
       alive = false;
@@ -66,35 +66,42 @@ export default function RootLayout() {
     };
   }, []);
 
-  // 2️⃣ ✅ [신규] 전역 소켓 연결 관리 (로그인 상태에 따라)
+  // 2️⃣ 전역 소켓 연결 관리 (로그인 ↔ 로그아웃 전환 시에만)
   useEffect(() => {
     if (!ready) return;
 
-    const manageSocket = async () => {
+    (async () => {
       if (loggedIn) {
-        // 로그인 상태: 토큰 꺼내서 소켓 연결
+        // 이미 한 번 연결했으면 다시 하지 않음
+        if (socketInitializedRef.current) return;
+        socketInitializedRef.current = true;
+
         const data = await loadTokenWithExpiry();
         if (data?.token) {
           console.log("[Layout] 전역 소켓 연결 시도...");
-          connectStomp(data.token).catch((e) =>
-            console.warn("[Layout] 소켓 연결 실패:", e)
-          );
+          try {
+            await connectStomp(data.token);
+          } catch (e) {
+            console.warn("[Layout] 소켓 연결 실패:", e);
+          }
         }
       } else {
-        // 로그아웃 상태: 소켓 끊기
-        console.log("[Layout] 전역 소켓 해제");
-        disconnectStomp();
+        // 로그아웃 시에만 끊기
+        if (socketInitializedRef.current) {
+          console.log("[Layout] 전역 소켓 해제");
+          disconnectStomp();
+          socketInitializedRef.current = false;
+        }
       }
-    };
-
-    manageSocket();
-  }, [loggedIn, ready]); // loggedIn이 바뀔 때마다 실행
+    })();
+  }, [loggedIn, ready]);
 
   // 3️⃣ 라우팅 방어 (리다이렉트)
   useEffect(() => {
     if (!rootNav?.key || !ready) return;
 
     if (DEV_BYPASS_AUTH) {
+      // 개발 중에는 라우팅 강제 이동 건너뜀
       return;
     }
 
