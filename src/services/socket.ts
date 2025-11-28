@@ -4,28 +4,34 @@ import type { ChatMessageResponse, MessageType } from "../types/chat";
 import { useSocketStore } from "../store/socketStore";
 import { Platform } from "react-native";
 
-// ❌ SockJS 제거 유지
-
 /**
- * 🌐 WebSocket URL 생성
+ * 🌐 WebSocket URL 생성 (최종 버전)
+ *
+ * - Web(브라우저):
+ *    👉 항상 현재 도메인 기준 /ws 사용
+ *    👉 ws(s)://zzaptalk.com/ws
+ *    👉 NGINX 가 /ws → zzaptalk-backend:8080/ws 로 프록시
+ *
+ * - Native(App):
+ *    👉 EXPO_PUBLIC_WS_BASE 있으면 우선 사용
+ *    👉 없으면 ws://10.0.2.2:8080/ws 기본값
  */
 const getWsUrl = () => {
-  // 1. .env에 정의된 값이 있으면 최우선 (ws://localhost:3000/ws 등)
+  // ✅ 1. Web 환경: 환경변수와 관계 없이 /ws 강제
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host; // ex) zzaptalk.com or localhost:3000
+    return `${protocol}//${host}/ws`;
+  }
+
+  // ✅ 2. Native 환경: .env 값이 있으면 사용
   const envUrl = process.env.EXPO_PUBLIC_WS_BASE;
   if (envUrl) {
     return envUrl;
   }
 
-  // 2. Web 환경: 브라우저 주소창 기반으로 자동 결정
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host; // localhost:3000
-    // Nginx가 /ws 경로를 프록시한다고 가정
-    return `${protocol}//${host}/ws`;
-  }
-
-  // 3. fallback (앱 등)
-  return "ws://localhost:8080/ws";
+  // ✅ 3. Native 기본값 (로컬 개발용)
+  return "ws://10.0.2.2:8080/ws";
 };
 
 // 주소 확정
@@ -36,7 +42,9 @@ console.log(`[Socket] WS_URL: ${WS_URL}`);
 let client: Client | null = null;
 let connectionPromise: Promise<void> | null = null;
 
-// ... (toIso, normalize 함수는 기존 코드 그대로 유지) ...
+/* ===============================
+ * 유틸: 날짜 → ISO 문자열
+ * =============================== */
 function toIso(v?: any): string {
   if (!v) return new Date().toISOString();
   if (v instanceof Date) return v.toISOString();
@@ -52,6 +60,9 @@ function toIso(v?: any): string {
   return new Date(v).toISOString();
 }
 
+/* ===============================
+ * 서버 → 클라이언트 메세지 정규화
+ * =============================== */
 function normalize(body: any): ChatMessageResponse {
   const msgId =
     typeof body?.messageId === "number" || typeof body?.messageId === "string"
@@ -84,22 +95,19 @@ function normalize(body: any): ChatMessageResponse {
   };
 }
 
-/* ============================
- * 1. 소켓 연결 (주소 적용 확인)
- * ============================ */
+/* ===============================
+ * 1. STOMP 연결
+ * =============================== */
 export function connectStomp(token: string): Promise<void> {
   if (client?.connected) return Promise.resolve();
   if (connectionPromise) return connectionPromise;
 
   connectionPromise = new Promise((resolve, reject) => {
     client = new Client({
-      // ✅ 위에서 결정한 WS_URL 사용
       brokerURL: WS_URL,
-
       connectHeaders: {
         Authorization: `Bearer ${token}`,
       },
-
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
 
@@ -129,7 +137,9 @@ export function connectStomp(token: string): Promise<void> {
   return connectionPromise;
 }
 
-// ... (subscribeRoom, disconnectStomp, sendChatMessage 등 나머지 함수는 기존 그대로 유지) ...
+/* ===============================
+ * 2. 채팅방 구독
+ * =============================== */
 export function subscribeRoom(
   roomId: number,
   onMessage: (msg: ChatMessageResponse) => void
@@ -138,6 +148,7 @@ export function subscribeRoom(
     console.warn("⚠️ 소켓이 연결되지 않아 구독할 수 없습니다.");
     return () => {};
   }
+
   const destination = `/topic/chat/room/${roomId}`;
   const subscription = client.subscribe(destination, (frame: IMessage) => {
     try {
@@ -147,9 +158,13 @@ export function subscribeRoom(
       console.error("❌ JSON Parse Error:", e);
     }
   });
+
   return () => subscription.unsubscribe();
 }
 
+/* ===============================
+ * 3. 연결 해제
+ * =============================== */
 export function disconnectStomp() {
   if (client) {
     client.deactivate();
@@ -160,6 +175,9 @@ export function disconnectStomp() {
   }
 }
 
+/* ===============================
+ * 4. 메시지 전송
+ * =============================== */
 export async function sendChatMessage(
   roomId: number,
   _senderId: number,
@@ -169,7 +187,9 @@ export async function sendChatMessage(
   if (!client || !client.connected) {
     throw new Error("STOMP not connected");
   }
+
   const payload = { roomId, content, type };
+
   client.publish({
     destination: "/app/chat/message",
     headers: { "Content-Type": "application/json" },

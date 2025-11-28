@@ -2,7 +2,9 @@
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import { Platform } from "react-native";
 
-// ... (ApiError 클래스는 기존 유지) ...
+/* ===============================
+ * 커스텀 ApiError 클래스
+ * =============================== */
 export class ApiError extends Error {
   status: number;
   data: any;
@@ -14,35 +16,42 @@ export class ApiError extends Error {
   }
 }
 
-/** ===============================
- * BASE URL 설정 (완전 수정됨)
+/* ===============================
+ * BASE URL 설정 (최종 버전)
+ *
+ * - Web(브라우저):
+ *    👉 항상 "/api" 로 고정
+ *    👉 NGINX 가 /api → zzaptalk-backend:8080 으로 프록시
+ *
+ * - Native(App):
+ *    👉 EXPO_PUBLIC_API_BASE 가 있으면 사용
+ *    👉 없으면 10.0.2.2:8080 (에뮬레이터 → 호스트) 기본값
  * =============================== */
 const getBaseUrl = () => {
-  // 1. 환경변수가 있으면 무조건 최우선 (끝에 /api가 있다면 제거 로직 포함 가능)
-  const envBase = process.env.EXPO_PUBLIC_API_BASE;
-  if (envBase) {
-    // 혹시라도 환경변수에 /api/ 처럼 슬래시가 중복될까봐 정리
-    return envBase.replace(/\/+$/, "");
-  }
-
-  // 2. Web 환경: 환경변수가 없으면 '상대 경로' 사용
-  // 이렇게 하면 http://localhost:3000/api 로 자동 매핑되어 CORS가 사라집니다.
+  // ✅ 1. Web 환경: 환경변수 여부와 관계없이 항상 /api 사용
   if (Platform.OS === "web") {
     return "/api";
   }
 
-  // 3. 앱(Native) 환경: 상대 경로 불가. (개발용 IP 예시)
-  // 앱에서는 localhost가 폰 자신이 되므로 컴퓨터 IP가 필요합니다.
-  // 여기는 하드코딩보다는 .env를 꼭 설정하시기를 권장합니다.
+  // ✅ 2. Native 환경: .env 를 우선 사용
+  const envBase = process.env.EXPO_PUBLIC_API_BASE;
+  if (envBase) {
+    // 혹시라도 슬래시가 겹치지 않도록 끝의 / 제거
+    return envBase.replace(/\/+$/, "");
+  }
+
+  // ✅ 3. Native 기본값 (로컬 개발용)
+  // - Android 에뮬레이터 기준: 10.0.2.2 = 호스트 PC
   return "http://10.0.2.2:8080/api";
 };
 
 // ✅ 최종 BASE URL
 export const BASE = getBaseUrl();
-
 console.log(`[API] Platform: ${Platform.OS}, BASE: '${BASE}'`);
 
-// ... (AUTH_TOKEN, setApiAuthToken 등 나머지 코드는 기존 유지) ...
+/* ===============================
+ * 전역 토큰 캐시
+ * =============================== */
 let AUTH_TOKEN: string | null = null;
 
 export function setApiAuthToken(token: string | null) {
@@ -58,32 +67,48 @@ export function clearApiAuthToken() {
   setApiAuthToken(null);
 }
 
-// ... (Axios 인스턴스 생성) ...
+/* ===============================
+ * Axios 인스턴스
+ * =============================== */
 export const api = axios.create({
   baseURL: BASE,
   timeout: 15000,
   headers: { "Content-Type": "application/json" },
-  withCredentials: true, // ✅ 쿠키/세션 공유를 위해 필수
+  // 프론트/백엔드가 같은 도메인(/api 프록시) 기준이라서
+  // withCredentials 는 있어도 되고 없어도 됨. (쿠키 쓰면 유지)
+  withCredentials: true,
 });
 
-// ... (나머지 인터셉터 및 get/post 함수들은 기존 코드 그대로 사용) ...
-// (기존 코드 생략 - 변경 없음)
+/* ===============================
+ * Axios 추가 타입
+ * =============================== */
 declare module "axios" {
   export interface AxiosRequestConfig {
     skipAuth?: boolean;
   }
 }
 
+/* ===============================
+ * 요청 인터셉터
+ * =============================== */
 api.interceptors.request.use((config) => {
   const headers = axios.AxiosHeaders.from(config.headers);
   config.headers = headers;
+
+  // 토큰 스킵 옵션
   if (config.skipAuth) return config;
+
+  // Authorization 헤더가 없고, 전역 토큰이 있으면 자동 주입
   if (AUTH_TOKEN && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${AUTH_TOKEN}`);
   }
+
   return config;
 });
 
+/* ===============================
+ * 응답 인터셉터
+ * =============================== */
 api.interceptors.response.use(
   (res) => res,
   (err: AxiosError) => {
@@ -109,6 +134,9 @@ api.interceptors.response.use(
   }
 );
 
+/* ===============================
+ * 편의 함수들 (GET/POST/PUT/DELETE)
+ * =============================== */
 export async function get<T>(
   url: string,
   params?: any,
@@ -117,6 +145,7 @@ export async function get<T>(
   const { data } = await api.get<T>(url, { params, ...(cfg || {}) });
   return data;
 }
+
 export async function post<T>(
   url: string,
   body?: any,
@@ -125,6 +154,7 @@ export async function post<T>(
   const { data } = await api.post<T>(url, body, cfg);
   return data;
 }
+
 export async function put<T>(
   url: string,
   body?: any,
@@ -133,10 +163,12 @@ export async function put<T>(
   const { data } = await api.put<T>(url, body, cfg);
   return data;
 }
+
 export async function del<T>(url: string, cfg?: AxiosRequestConfig) {
   const { data } = await api.delete<T>(url, cfg);
   return data;
 }
+
 export async function postText(
   url: string,
   body?: any,
