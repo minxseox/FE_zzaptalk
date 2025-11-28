@@ -2,40 +2,14 @@
 import { Client, IMessage } from "@stomp/stompjs";
 import type { ChatMessageResponse, MessageType } from "../types/chat";
 import { useSocketStore } from "../store/socketStore";
-import { Platform } from "react-native";
 
 /**
- * 🌐 WebSocket URL 생성 (최종 버전)
+ * 🌐 WebSocket URL (최종 고정)
  *
- * - Web(브라우저):
- *    👉 항상 현재 도메인 기준 /ws 사용
- *    👉 ws(s)://zzaptalk.com/ws
- *    👉 NGINX 가 /ws → zzaptalk-backend:8080/ws 로 프록시
- *
- * - Native(App):
- *    👉 EXPO_PUBLIC_WS_BASE 있으면 우선 사용
- *    👉 없으면 ws://10.0.2.2:8080/ws 기본값
+ * - Docker 환경 기본값: ws://zzaptalk-backend:8080/ws
+ * - 더 이상 localhost, zzaptalk.com 같은 주소는 사용하지 않음
  */
-const getWsUrl = () => {
-  // ✅ 1. Web 환경: 환경변수와 관계 없이 /ws 강제
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host; // ex) zzaptalk.com or localhost:3000
-    return `${protocol}//${host}/ws`;
-  }
-
-  // ✅ 2. Native 환경: .env 값이 있으면 사용
-  const envUrl = process.env.EXPO_PUBLIC_WS_BASE;
-  if (envUrl) {
-    return envUrl;
-  }
-
-  // ✅ 3. Native 기본값 (로컬 개발용)
-  return "ws://10.0.2.2:8080/ws";
-};
-
-// 주소 확정
-const WS_URL = getWsUrl();
+const WS_URL = "ws://zzaptalk-backend:8080/ws";
 console.log(`[Socket] WS_URL: ${WS_URL}`);
 
 // 내부 상태

@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   frontend:
     image: minxseox/my-expo-web:latest # 또는 build: . 쓰고 직접 빌드해도 됨

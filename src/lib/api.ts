@@ -1,6 +1,5 @@
 // src/lib/api.ts
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
-import { Platform } from "react-native";
 
 /* ===============================
  * 커스텀 ApiError 클래스
@@ -19,35 +18,28 @@ export class ApiError extends Error {
 /* ===============================
  * BASE URL 설정 (최종 버전)
  *
- * - Web(브라우저):
- *    👉 항상 "/api" 로 고정
- *    👉 NGINX 가 /api → zzaptalk-backend:8080 으로 프록시
- *
- * - Native(App):
- *    👉 EXPO_PUBLIC_API_BASE 가 있으면 사용
- *    👉 없으면 10.0.2.2:8080 (에뮬레이터 → 호스트) 기본값
+ * ❗ 요구사항:
+ *  - Docker 환경 기본값은 항상 "/api"
+ *  - NGINX 가 /api → zzaptalk-backend:8080 으로 프록시
+ *  - EXPO_PUBLIC_API_BASE 로 덮어쓸 수 있음
  * =============================== */
 const getBaseUrl = () => {
-  // ✅ 1. Web 환경: 환경변수 여부와 관계없이 항상 /api 사용
-  if (Platform.OS === "web") {
-    return "/api";
-  }
-
-  // ✅ 2. Native 환경: .env 를 우선 사용
+  // 1. .env 에서 EXPO_PUBLIC_API_BASE 가 오면 최우선 사용
   const envBase = process.env.EXPO_PUBLIC_API_BASE;
   if (envBase) {
-    // 혹시라도 슬래시가 겹치지 않도록 끝의 / 제거
+    // 슬래시 중복 방지
     return envBase.replace(/\/+$/, "");
   }
 
-  // ✅ 3. Native 기본값 (로컬 개발용)
-  // - Android 에뮬레이터 기준: 10.0.2.2 = 호스트 PC
-  return "http://10.0.2.2:8080/api";
+  // 2. 기본값: /api
+  //  - 웹:   http://<host>/api
+  //  - 도커: NGINX 가 /api → zzaptalk-backend:8080 으로 포워딩
+  return "/api";
 };
 
 // ✅ 최종 BASE URL
 export const BASE = getBaseUrl();
-console.log(`[API] Platform: ${Platform.OS}, BASE: '${BASE}'`);
+console.log(`[API] BASE: '${BASE}'`);
 
 /* ===============================
  * 전역 토큰 캐시
@@ -74,8 +66,6 @@ export const api = axios.create({
   baseURL: BASE,
   timeout: 15000,
   headers: { "Content-Type": "application/json" },
-  // 프론트/백엔드가 같은 도메인(/api 프록시) 기준이라서
-  // withCredentials 는 있어도 되고 없어도 됨. (쿠키 쓰면 유지)
   withCredentials: true,
 });
 
