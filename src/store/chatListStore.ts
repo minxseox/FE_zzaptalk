@@ -1,11 +1,20 @@
+// src/store/chatListStore.ts
 import { create } from "zustand";
 import type { ChatRoomUserListItem } from "../types/chat";
 
+// 💡 API에서 내려오는 기본 타입에 lastMessage/lastMessageAt/unreadCount를
+//   클라이언트에서 추가로 얹어서 써도 되도록 확장
+type RoomItem = ChatRoomUserListItem & {
+  lastMessage?: string;
+  lastMessageAt?: string;
+  unreadCount?: number;
+};
+
 interface ChatListState {
-  rooms: ChatRoomUserListItem[];
+  rooms: RoomItem[];
   setRooms: (rooms: ChatRoomUserListItem[]) => void;
 
-  // 메시지 갱신 + 안 읽은 개수 처리 (isRead 추가)
+  // 메시지 갱신 + 안 읽은 개수 처리 (isRead: 이 메시지를 읽은 상태로 둘지 여부)
   updateRoomLastMessage: (
     roomId: number,
     message: string,
@@ -13,47 +22,47 @@ interface ChatListState {
     isRead?: boolean
   ) => void;
 
-  // 뱃지 초기화 함수
+  // 뱃지 초기화 함수 (채팅방 들어갈 때 호출)
   resetUnreadCount: (roomId: number) => void;
 }
 
 export const useChatListStore = create<ChatListState>((set) => ({
   rooms: [],
 
-  // 목록 초기화
-  setRooms: (rooms) => set({ rooms }),
+  // 📌 목록 초기화 (API에서 받은 원본 리스트를 그대로 세팅)
+  setRooms: (rooms) => set({ rooms: rooms as RoomItem[] }),
 
-  // ✅ 실시간 갱신 로직 (뱃지 카운트 로직 추가됨)
+  // ✅ 실시간 갱신 로직 (마지막 메시지 + 시간 + 뱃지 + 정렬)
   updateRoomLastMessage: (roomId, message, time, isRead = false) =>
     set((state) => {
-      const index = state.rooms.findIndex((r) => r.roomId === roomId);
+      const idx = state.rooms.findIndex((r) => r.roomId === roomId);
 
-      // 목록에 없는 방이면 갱신 안 함
-      if (index === -1) return { rooms: state.rooms };
+      // 목록에 없는 방이면 그대로 반환
+      if (idx === -1) return { rooms: state.rooms };
 
-      const targetRoom = { ...state.rooms[index] };
+      const targetRoom: RoomItem = { ...state.rooms[idx] };
 
-      // 1. 메시지 내용 & 시간 업데이트
-      (targetRoom as any).lastMessage = message;
-      (targetRoom as any).lastMessageAt = time;
+      // 1. 마지막 메시지 내용 & 시간 업데이트
+      targetRoom.lastMessage = message;
+      targetRoom.lastMessageAt = time;
 
-      // 2. 🔴 뱃지 카운트 로직
+      // 2. 뱃지 카운트 로직
       if (!isRead) {
         // 읽지 않은 상태라면 기존 카운트 + 1
-        const currentCount = (targetRoom as any).unreadCount || 0;
-        (targetRoom as any).unreadCount = currentCount + 1;
+        const current = targetRoom.unreadCount ?? 0;
+        targetRoom.unreadCount = current + 1;
       } else {
-        // 읽은 상태(내가 보냈거나, 방에 들어와 있음)라면 0으로 초기화
-        (targetRoom as any).unreadCount = 0;
+        // 내가 보낸 메시지이거나, 방 안에서 바로 읽은 메시지이면 0으로
+        targetRoom.unreadCount = 0;
       }
 
-      // 3. 방을 맨 위로 이동
+      // 3. 방을 맨 위로 이동 (카톡처럼 정렬)
       const otherRooms = state.rooms.filter((r) => r.roomId !== roomId);
 
       return { rooms: [targetRoom, ...otherRooms] };
     }),
 
-  // ✅ 뱃지 초기화 구현 (방 들어갈 때 사용)
+  // ✅ 뱃지 초기화 (채팅방 들어갈 때 사용)
   resetUnreadCount: (roomId) =>
     set((state) => ({
       rooms: state.rooms.map((r) =>

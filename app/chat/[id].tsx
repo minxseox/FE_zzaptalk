@@ -74,9 +74,11 @@ async function getMyId(): Promise<number | null> {
 // 전송 호환성 함수
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
+  // (roomId, content) 시그니처 지원
   if (sendChatMessageRaw.length === 2) {
     return sendChatMessageRaw(roomId, content);
   }
+  // (roomId, myId, content) 시그니처 지원
   return sendChatMessageRaw(roomId, myId, content);
 }
 
@@ -94,8 +96,8 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // Store
-  const messages = useChatStore((state) => state.messages);
+  // ✅ Store (방별 메시지 사용)
+  const messages = useChatStore((state) => state.messagesByRoom[roomId] ?? []);
   const setMessages = useChatStore((state) => state.setMessages);
   const addMessage = useChatStore((state) => state.addMessage);
 
@@ -110,7 +112,7 @@ export default function ChatRoomScreen() {
   const flatRef = useRef<FlatList<ChatMessageResponse>>(null);
   const lastRedirectRef = useRef<Href | null>(null);
 
-  // ✅ [추가] 친구 프로필 모달 상태
+  // ✅ 친구 프로필 모달 상태
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -151,7 +153,8 @@ export default function ChatRoomScreen() {
         (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
       );
 
-      setMessages(sorted);
+      // ✅ 방별로 저장
+      setMessages(roomId, sorted);
       scrollToBottom();
     } catch (e: any) {
       if (e?.status === 401) return redirectOnce("/login" as Href);
@@ -168,7 +171,8 @@ export default function ChatRoomScreen() {
       const sorted = [...data].sort(
         (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
       );
-      setMessages(sorted);
+      // ✅ 방별로 저장
+      setMessages(roomId, sorted);
       scrollToBottom();
     } catch (e: any) {
       if (e?.status === 401) return redirectOnce("/login" as Href);
@@ -180,6 +184,7 @@ export default function ChatRoomScreen() {
   useEffect(() => {
     if (!navReady) return;
     initialLoad();
+    // 방에 들어온 순간 → 안읽음 0으로
     resetUnreadCount(roomId);
   }, [navReady, initialLoad, roomId, resetUnreadCount]);
 
@@ -189,11 +194,16 @@ export default function ChatRoomScreen() {
   // 소켓 구독
   useEffect(() => {
     if (!subscribeRoom) return;
+
     const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
-      addMessage(m);
+      console.log("📩 WS 메시지 수신:", m);
+      addMessage(roomId, m);
       scrollToBottom();
+
+      // ⚠️ ChatRoom 안에 있을 때 받은 메시지는 모두 "읽은 상태"로 처리
       updateRoomLastMessage(roomId, m.content, m.createdAt, true);
     });
+
     return () => {
       unsub?.();
     };
@@ -215,7 +225,8 @@ export default function ChatRoomScreen() {
       type: "TEXT",
     };
 
-    addMessage(optimistic);
+    // ✅ 방별로 메시지 추가 + 마지막 메시지 갱신 (읽은 상태)
+    addMessage(roomId, optimistic);
     updateRoomLastMessage(roomId, t, nowIso, true);
     setText("");
     scrollToBottom();
@@ -238,14 +249,13 @@ export default function ChatRoomScreen() {
     updateRoomLastMessage,
   ]);
 
-  // ✅ [API] 친구 프로필 클릭 핸들러
+  // ✅ 친구 프로필 클릭 핸들러
   const handlePressAvatar = async (senderId: number) => {
     if (senderId === myId) return; // 내 프로필은 무시 (또는 내 프로필로 이동)
 
     setProfileLoading(true);
     setProfileModalVisible(true);
     try {
-      // GET /api/v1/friends/{friendId}/profile
       const data = await fetchFriendProfile(senderId);
       setSelectedProfile(data);
     } catch (e) {
@@ -298,13 +308,10 @@ export default function ChatRoomScreen() {
             ]}
           >
             {!mine && (
-              // ✅ [수정] 상대방 아바타 영역 (클릭 시 프로필 조회)
               <Pressable
                 style={styles.avatarContainer}
                 onPress={() => handlePressAvatar(item.senderId)}
               >
-                {/* 실제 이미지가 있으면 Image, 없으면 아이콘 */}
-                {/* 메시지 객체에 profileUrl이 있다면 사용, 없으면 기본 아이콘 */}
                 <View style={styles.avatarPlaceholder}>
                   <Text style={styles.avatarInitial}>
                     {item.senderName?.charAt(0) ?? "?"}
@@ -327,7 +334,6 @@ export default function ChatRoomScreen() {
                 ]}
               >
                 {!mine && item.senderName ? (
-                  // 이름 클릭 시에도 프로필 조회 가능하게 할 수 있음
                   <Text style={styles.senderName}>{item.senderName}</Text>
                 ) : null}
                 <Text style={mine ? styles.msgTextMine : styles.msgTextOther}>
@@ -424,7 +430,7 @@ export default function ChatRoomScreen() {
         </View>
       </View>
 
-      {/* ✅ [추가] 친구 프로필 모달 */}
+      {/* 친구 프로필 모달 */}
       <Modal
         visible={profileModalVisible}
         transparent
@@ -496,7 +502,7 @@ export default function ChatRoomScreen() {
                         </Text>
                       </View>
 
-                      {/* 하단 버튼 (예: 1:1 채팅, 통화 등) */}
+                      {/* 하단 버튼 */}
                       <View style={modalStyles.actionRow}>
                         <View style={modalStyles.actionItem}>
                           <Ionicons name="chatbubble" size={20} color="#fff" />
@@ -518,7 +524,6 @@ export default function ChatRoomScreen() {
 const PURPLE = "#9997FF";
 
 const styles = StyleSheet.create({
-  // 기존 스타일 유지
   header: {
     height: 56,
     paddingHorizontal: 12,
@@ -555,7 +560,6 @@ const styles = StyleSheet.create({
   msgRowMine: { justifyContent: "flex-end" },
   msgRowOther: { justifyContent: "flex-start" },
 
-  // ✅ [수정] 아바타 스타일
   avatarContainer: { marginRight: 8, alignSelf: "flex-start" },
   avatarPlaceholder: {
     width: 34,
@@ -630,7 +634,7 @@ const styles = StyleSheet.create({
   },
 });
 
-// ✅ [추가] 모달용 스타일
+// 모달용 스타일
 const modalStyles = StyleSheet.create({
   overlay: {
     flex: 1,

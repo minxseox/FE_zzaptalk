@@ -12,7 +12,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
-  // StyleSheet 제거 (더 이상 필요 없음)
 } from "react-native";
 import { useRouter, type Href, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -24,7 +23,6 @@ import {
   getChatRoomList,
   createOrGetSingleChatRoom,
 } from "../../../src/services/chat";
-import type { ChatRoomUserListItem } from "../../../src/types/chat";
 import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
@@ -33,7 +31,6 @@ export default function ChatListScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // ✅ useState 제거하고 Store 사용
   const rooms = useChatListStore((state) => state.rooms);
   const setRooms = useChatListStore((state) => state.setRooms);
 
@@ -124,17 +121,14 @@ export default function ChatListScreen() {
 
   return (
     <View style={styles.safeArea}>
-      {/* ✅ [수정] 헤더 영역: 스타일 파일(module)의 클래스 사용 */}
+      {/* 헤더 */}
       <View style={styles.header}>
-        {/* 타이틀을 화면 정중앙에 배치하기 위한 절대 위치 컨테이너 */}
         <View style={styles.headerTitleWrapper}>
           <Text style={styles.headerTitle}>채팅</Text>
         </View>
 
-        {/* 왼쪽 빈 공간 (기존 유지) */}
         <View style={styles.headerLeft} />
 
-        {/* 오른쪽 아이콘 영역 */}
         <View style={styles.headerRight}>
           <Pressable style={styles.headerIconBtn}>
             <Ionicons name="search" size={20} style={styles.headerIcon} />
@@ -179,42 +173,110 @@ export default function ChatListScreen() {
               </Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <Pressable
-              style={styles.roomRow}
-              onPress={() => goRoom(item.roomId, item.roomName)}
-            >
-              <View style={styles.roomAvatar}>
-                <Text style={styles.roomAvatarInitial}>
-                  {item.roomName?.charAt(0) ?? "?"}
-                </Text>
-              </View>
+          renderItem={({ item }) => {
+            const lastMessage =
+              (item as any).lastMessage ?? "대화 내용이 없습니다.";
+            const lastMessageAt = (item as any).lastMessageAt as
+              | string
+              | undefined;
+            const unreadCount = (item as any).unreadCount as number | undefined;
 
-              <View style={{ flex: 1, justifyContent: "center" }}>
-                {/* 상단: 방 이름 */}
-                <View
-                  style={{
-                    flexDirection: "row",
-                    justifyContent: "space-between",
-                    marginBottom: 2,
-                  }}
-                >
-                  <Text style={styles.roomName} numberOfLines={1}>
-                    {item.roomName || "알 수 없는 채팅방"}
+            const timeLabel = lastMessageAt
+              ? new Date(lastMessageAt).toLocaleTimeString("ko-KR", {
+                  hour: "numeric",
+                  minute: "2-digit",
+                })
+              : "";
+
+            return (
+              <Pressable
+                style={styles.roomRow}
+                onPress={() => goRoom(item.roomId, item.roomName)}
+              >
+                {/* 왼쪽 아바타 */}
+                <View style={styles.roomAvatar}>
+                  <Text style={styles.roomAvatarInitial}>
+                    {item.roomName?.charAt(0) ?? "?"}
                   </Text>
                 </View>
 
-                {/* 하단: 마지막 메시지 */}
-                <Text style={{ fontSize: 13, color: "#888" }} numberOfLines={1}>
-                  {(item as any).lastMessage || "대화 내용이 없습니다."}
-                </Text>
-              </View>
-            </Pressable>
-          )}
+                {/* 가운데: 방 이름 + 마지막 메시지 / 오른쪽: 시간 + 뱃지 */}
+                <View
+                  style={{
+                    flex: 1,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  {/* 방 이름 + 마지막 메시지 */}
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                        marginBottom: 2,
+                      }}
+                    >
+                      <Text style={styles.roomName} numberOfLines={1}>
+                        {item.roomName || "알 수 없는 채팅방"}
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={{ fontSize: 13, color: "#888" }}
+                      numberOfLines={1}
+                    >
+                      {lastMessage}
+                    </Text>
+                  </View>
+
+                  {/* 시간 + 뱃지 */}
+                  <View style={{ alignItems: "flex-end" }}>
+                    {timeLabel ? (
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          color: "#999",
+                          marginBottom: unreadCount ? 4 : 0,
+                        }}
+                      >
+                        {timeLabel}
+                      </Text>
+                    ) : null}
+
+                    {unreadCount && unreadCount > 0 && (
+                      <View
+                        style={{
+                          minWidth: 18,
+                          paddingHorizontal: 4,
+                          height: 18,
+                          borderRadius: 9,
+                          backgroundColor: "#FF4D4F",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#fff",
+                            fontSize: 11,
+                            fontWeight: "600",
+                          }}
+                        >
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </Pressable>
+            );
+          }}
         />
       )}
 
-      {/* 모달 */}
+      {/* 새 채팅 생성 모달 */}
       <Modal
         visible={showCreate}
         transparent

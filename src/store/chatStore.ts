@@ -1,21 +1,41 @@
 // src/store/chatStore.ts
 import { create } from "zustand";
-// 👇 여기가 핵심입니다. 임의의 Message 타입 대신 실제 타입을 가져오세요.
-import { ChatMessageResponse } from "../types/chat";
+import type { ChatMessageResponse } from "../types/chat";
 
 interface ChatState {
-  // messages 배열이 'ChatMessageResponse' 타입을 따르도록 수정
-  messages: ChatMessageResponse[];
-  addMessage: (msg: ChatMessageResponse) => void;
-  setMessages: (msgs: ChatMessageResponse[]) => void;
+  // ✅ 방별로 메시지 저장
+  messagesByRoom: Record<number, ChatMessageResponse[]>;
+  setMessages: (roomId: number, msgs: ChatMessageResponse[]) => void;
+  addMessage: (roomId: number, msg: ChatMessageResponse) => void;
+  clearRoom: (roomId: number) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
-  messages: [],
+  messagesByRoom: {},
 
-  // 새 메시지 추가
-  addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
+  setMessages: (roomId, msgs) =>
+    set((state) => ({
+      messagesByRoom: {
+        ...state.messagesByRoom,
+        [roomId]: msgs,
+      },
+    })),
 
-  // 전체 메시지 교체 (초기 로딩 등)
-  setMessages: (msgs) => set({ messages: msgs }),
+  addMessage: (roomId, msg) =>
+    set((state) => {
+      const prev = state.messagesByRoom[roomId] ?? [];
+      return {
+        messagesByRoom: {
+          ...state.messagesByRoom,
+          [roomId]: [...prev, msg],
+        },
+      };
+    }),
+
+  clearRoom: (roomId) =>
+    set((state) => {
+      const copy = { ...state.messagesByRoom };
+      delete copy[roomId];
+      return { messagesByRoom: copy };
+    }),
 }));
