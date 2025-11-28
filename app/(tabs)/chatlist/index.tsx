@@ -26,14 +26,18 @@ import styles from "../../../src/styles/chat/ChatList.module";
 
 export default function ChatListScreen() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
-  // ✅ Store 사용
+  // ✅ Store 상태 구독
   const rooms = useChatListStore((state) => state.rooms);
   const setRoomsFromServer = useChatListStore(
     (state) => state.setRoomsFromServer
   );
+
+  // ✅ 초기 로딩 상태 설정 (Store의 현재 상태를 바로 확인하여 깜빡임 방지)
+  const [loading, setLoading] = useState(
+    () => useChatListStore.getState().rooms.length === 0
+  );
+  const [refreshing, setRefreshing] = useState(false);
 
   // 모달 상태
   const [showCreate, setShowCreate] = useState(false);
@@ -41,32 +45,41 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // 채팅방 목록 로딩
-  const fetchRooms = async (isRefresh = false) => {
-    if (!isRefresh && rooms.length === 0) setLoading(true);
-    try {
-      const data = await getChatRoomList();
-      // ✅ 서버 응답을 store로 머지
-      setRoomsFromServer(data);
-    } catch (e) {
-      console.error("[ChatList] 채팅방 목록 조회 실패:", e);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  // ✅ [핵심 수정] 채팅방 목록 로딩 함수
+  // rooms 상태에 의존하지 않도록 getState()를 사용해 루프 방지
+  const fetchRooms = useCallback(
+    async (isRefresh = false) => {
+      try {
+        // 새로고침이 아니고, 현재 데이터가 없을 때만 로딩 표시
+        const currentRoomsCount = useChatListStore.getState().rooms.length;
+        if (!isRefresh && currentRoomsCount === 0) {
+          setLoading(true);
+        }
 
-  // 포커스 시 갱신
+        const data = await getChatRoomList();
+        // 서버 응답을 store로 머지
+        setRoomsFromServer(data);
+      } catch (e) {
+        console.error("[ChatList] 채팅방 목록 조회 실패:", e);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [setRoomsFromServer]
+  );
+
+  // ✅ 포커스 시 갱신 (fetchRooms가 안정화되어 루프 안 돎)
   useFocusEffect(
     useCallback(() => {
       fetchRooms();
-    }, [])
+    }, [fetchRooms])
   );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchRooms(true);
-  }, []);
+  }, [fetchRooms]);
 
   const goRoom = useCallback(
     (roomId: number, roomName?: string) => {
@@ -105,6 +118,8 @@ export default function ChatListScreen() {
 
       setShowCreate(false);
       setPartnerId("");
+
+      // 방 생성 후 목록 갱신
       await fetchRooms();
       goRoom(roomId, roomName);
     } catch (err: any) {
@@ -117,7 +132,7 @@ export default function ChatListScreen() {
     } finally {
       setCreating(false);
     }
-  }, [partnerId, goRoom]);
+  }, [partnerId, goRoom, fetchRooms]);
 
   return (
     <View style={styles.safeArea}>
