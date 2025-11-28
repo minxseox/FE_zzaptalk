@@ -64,11 +64,16 @@ export const useChatListStore = create<ChatListState>((set) => ({
         };
       });
 
-      // (선택) 마지막 메시지 시간 기준으로 정렬 – 최신 대화가 위로 오도록
+      // ✅ 안전한 날짜 정렬 (NaN 처리 포함)
       merged.sort((a, b) => {
         const tA = a.lastMessageTime ? Date.parse(a.lastMessageTime) : 0;
         const tB = b.lastMessageTime ? Date.parse(b.lastMessageTime) : 0;
-        return tB - tA;
+
+        // ✅ NaN 체크 추가
+        const timeA = Number.isNaN(tA) ? 0 : tA;
+        const timeB = Number.isNaN(tB) ? 0 : tB;
+
+        return timeB - timeA;
       });
 
       return { rooms: merged };
@@ -78,7 +83,12 @@ export const useChatListStore = create<ChatListState>((set) => ({
   updateRoomLastMessage: (roomId, message, time, isRead = false) =>
     set((state) => {
       const index = state.rooms.findIndex((r) => r.roomId === roomId);
-      if (index === -1) return { rooms: state.rooms };
+
+      // ✅ 방이 없으면 조용히 무시 (에러 방지)
+      if (index === -1) {
+        console.warn(`[ChatListStore] Room ${roomId} not found`);
+        return { rooms: state.rooms };
+      }
 
       const target = state.rooms[index];
 

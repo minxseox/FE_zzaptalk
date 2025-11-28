@@ -1,5 +1,5 @@
 // app/(tabs)/chatlist/index.tsx
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -30,10 +30,8 @@ export default function ChatListScreen() {
   // ✅ Store 상태 구독
   const rooms = useChatListStore((state) => state.rooms);
 
-  // ✅ 초기 로딩 상태 설정 (Store의 현재 상태를 바로 확인하여 깜빡임 방지)
-  const [loading, setLoading] = useState(
-    () => useChatListStore.getState().rooms.length === 0
-  );
+  // ✅ 초기 로딩 상태는 true로 고정 (Hydration 안전)
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   // 모달 상태
@@ -45,8 +43,8 @@ export default function ChatListScreen() {
   // ✅ 채팅방 목록 로딩 함수 (Zustand setter는 getState로 고정 참조 사용)
   const fetchRooms = useCallback(async (isRefresh = false) => {
     try {
-      const currentRoomsCount = useChatListStore.getState().rooms.length;
-      if (!isRefresh && currentRoomsCount === 0) {
+      // isRefresh가 아닐 때만 로딩 상태 표시
+      if (!isRefresh) {
         setLoading(true);
       }
 

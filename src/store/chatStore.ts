@@ -21,9 +21,18 @@ export const useChatStore = create<ChatState>((set) => ({
       },
     })),
 
+  // ✅ 중복 방지 추가
   addMessage: (roomId, msg) =>
     set((state) => {
       const prev = state.messagesByRoom[roomId] ?? [];
+
+      // ✅ 이미 존재하는 메시지인지 확인 (messageId 기준)
+      const exists = prev.some((m) => m.messageId === msg.messageId);
+      if (exists) {
+        console.log(`[ChatStore] 중복 메시지 무시: ${msg.messageId}`);
+        return state; // 상태 변경 없음
+      }
+
       return {
         messagesByRoom: {
           ...state.messagesByRoom,

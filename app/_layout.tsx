@@ -1,4 +1,3 @@
-// app/_layout.tsx
 import {
   Stack,
   usePathname,
@@ -25,6 +24,33 @@ const norm = (p: string) => {
 const DEV_BYPASS_AUTH = true;
 
 export default function RootLayout() {
+  // ✅ 클라이언트 전용 렌더링 (Hydration 오류 방지)
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // 클라이언트에서만 렌더링
+  if (!mounted) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#fff",
+        }}
+      >
+        <ActivityIndicator size="large" color="#9997FF" />
+      </View>
+    );
+  }
+
+  return <RootLayoutContent />;
+}
+
+function RootLayoutContent() {
   const router = useRouter();
   const pathname = usePathname();
   const rootNav = useRootNavigationState();
@@ -129,9 +155,10 @@ export default function RootLayout() {
           flex: 1,
           alignItems: "center",
           justifyContent: "center",
+          backgroundColor: "#fff",
         }}
       >
-        <ActivityIndicator />
+        <ActivityIndicator size="large" color="#9997FF" />
       </View>
     );
   }
