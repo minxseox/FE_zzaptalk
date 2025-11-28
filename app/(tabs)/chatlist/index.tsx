@@ -29,9 +29,6 @@ export default function ChatListScreen() {
 
   // ✅ Store 상태 구독
   const rooms = useChatListStore((state) => state.rooms);
-  const setRoomsFromServer = useChatListStore(
-    (state) => state.setRoomsFromServer
-  );
 
   // ✅ 초기 로딩 상태 설정 (Store의 현재 상태를 바로 확인하여 깜빡임 방지)
   const [loading, setLoading] = useState(
@@ -45,31 +42,27 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ [핵심 수정] 채팅방 목록 로딩 함수
-  // rooms 상태에 의존하지 않도록 getState()를 사용해 루프 방지
-  const fetchRooms = useCallback(
-    async (isRefresh = false) => {
-      try {
-        // 새로고침이 아니고, 현재 데이터가 없을 때만 로딩 표시
-        const currentRoomsCount = useChatListStore.getState().rooms.length;
-        if (!isRefresh && currentRoomsCount === 0) {
-          setLoading(true);
-        }
-
-        const data = await getChatRoomList();
-        // 서버 응답을 store로 머지
-        setRoomsFromServer(data);
-      } catch (e) {
-        console.error("[ChatList] 채팅방 목록 조회 실패:", e);
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
+  // ✅ 채팅방 목록 로딩 함수 (Zustand setter는 getState로 고정 참조 사용)
+  const fetchRooms = useCallback(async (isRefresh = false) => {
+    try {
+      const currentRoomsCount = useChatListStore.getState().rooms.length;
+      if (!isRefresh && currentRoomsCount === 0) {
+        setLoading(true);
       }
-    },
-    [setRoomsFromServer]
-  );
 
-  // ✅ 포커스 시 갱신 (fetchRooms가 안정화되어 루프 안 돎)
+      const data = await getChatRoomList();
+
+      const setRoomsFromServer = useChatListStore.getState().setRoomsFromServer;
+      setRoomsFromServer(data);
+    } catch (e) {
+      console.error("[ChatList] 채팅방 목록 조회 실패:", e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  // ✅ 포커스 시 갱신
   useFocusEffect(
     useCallback(() => {
       fetchRooms();

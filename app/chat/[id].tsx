@@ -248,20 +248,22 @@ export default function ChatRoomScreen() {
   if (!navReady) return null;
   if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
 
-  // 소켓 구독
+  // 🔥 소켓 구독 (무한 루프 방지 버전)
   useEffect(() => {
     if (!subscribeRoom) return;
+
+    // ✅ Zustand setter는 getState()로 고정된 참조 사용
+    const addMsg = useChatStore.getState().addMessage;
+    const updateLast = useChatListStore.getState().updateRoomLastMessage;
 
     const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
       console.log("📩 WS 메시지 수신:", m);
 
-      // ✅ 수정: WS 메시지도 정규화해서 사용
       const normalized = normalizeRestMessage(m);
-      addMessage(roomId, normalized);
+      addMsg(roomId, normalized);
       scrollToBottom();
 
-      // ✅ 수정: 정규화된 시간으로 lastMessage 업데이트
-      updateRoomLastMessage(
+      updateLast(
         roomId,
         normalized.content,
         normalized.createdAt,
@@ -272,7 +274,7 @@ export default function ChatRoomScreen() {
     return () => {
       unsub?.();
     };
-  }, [roomId, addMessage, scrollToBottom, updateRoomLastMessage]);
+  }, [roomId, scrollToBottom]);
 
   const onSend = useCallback(async () => {
     const t = text.trim();
