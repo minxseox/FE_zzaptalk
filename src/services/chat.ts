@@ -8,10 +8,10 @@ import type {
 
 // ---- Paths (오타/변경에 대비)
 const PATH = {
-  LIST: "/api/chat/rooms/list",
-  SINGLE: "/api/chat/rooms/single",
-  GROUP: "/api/chat/rooms/group",
-  MESSAGES: (roomId: number) => `/api/chat/rooms/${roomId}/messages`,
+  LIST: "/chat/rooms/list",
+  SINGLE: "/chat/rooms/single",
+  GROUP: "/chat/rooms/group",
+  MESSAGES: (roomId: number) => `/chat/rooms/${roomId}/messages`,
 } as const;
 
 // 그룹 생성 응답 (명세 반영)

@@ -2,9 +2,7 @@
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import { Platform } from "react-native";
 
-/** ===============================
- * 커스텀 에러 클래스
- * =============================== */
+// ... (ApiError 클래스는 그대로 유지) ...
 export class ApiError extends Error {
   status: number;
   data: any;
@@ -17,45 +15,48 @@ export class ApiError extends Error {
 }
 
 /** ===============================
- * BASE URL 설정 (최종 완성본)
+ * BASE URL 설정 (수정됨)
  * =============================== */
 const getBaseUrl = () => {
-  const envBase = process.env.EXPO_PUBLIC_API_BASE;
+  // ✅ 환경변수에서 혹시라도 끝에 붙은 /api를 제거합니다.
+  const envBase = process.env.EXPO_PUBLIC_API_BASE?.replace(/\/api\/?$/, "");
 
   // 📌 Native(iOS/Android)
   if (Platform.OS === "ios" || Platform.OS === "android") {
     if (envBase) return envBase;
-    return "https://api.zzaptalk.com"; // Fallback
+    return "https://api.zzaptalk.com";
   }
 
   // 📌 Web(Docker 빌드 포함)
   if (Platform.OS === "web") {
-    // 1순위: EXPO_PUBLIC_API_BASE가 있다면 사용
     if (envBase) return envBase;
 
     let host = "";
     if (typeof window !== "undefined") host = window.location.hostname;
 
-    // 2순위: 도커 + Nginx 환경 (localhost에서 서비스됨)
+    // 2순위: 도커 + Nginx 환경 (localhost 등)
     if (host === "localhost" || host === "127.0.0.1") {
-      return ""; // ★ /api 를 그대로 쓰기 위해 빈 문자열
+      // ✅ [핵심] 여기서 ""를 리턴해야 요청이 /chat/...으로 나가고
+      // Nginx가 location /chat (혹은 location /) 설정을 따르게 됩니다.
+      // 만약 Nginx가 location /api를 기다린다면, 여기서 ""를 리턴하고
+      // chat.ts에는 /chat 만 있어도 Nginx 설정(Rewrite)에 따라 작동할 수 있습니다.
+      return "";
     }
 
     // 3순위: 배포된 웹
+    // ✅ 여기도 끝에 /api를 붙이지 않습니다.
     return "https://api.zzaptalk.com";
   }
 
-  // 기본값
   return "https://api.zzaptalk.com";
 };
 
+// ✅ 최종적으로 한 번 더 슬래시 제거
 export const BASE = getBaseUrl().replace(/\/+$/, "");
 
 console.log(`[API] Platform: ${Platform.OS}, BASE: '${BASE}'`);
 
-/** ===============================
- * 전역 토큰 캐시
- * =============================== */
+// ... (AUTH_TOKEN, setApiAuthToken 등 나머지 코드는 그대로 유지) ...
 let AUTH_TOKEN: string | null = null;
 
 export function setApiAuthToken(token: string | null) {
@@ -71,27 +72,21 @@ export function clearApiAuthToken() {
   setApiAuthToken(null);
 }
 
-/** ===============================
- * Axios 인스턴스
- * =============================== */
+// ... (Axios 인스턴스 생성 유지) ...
 export const api = axios.create({
-  baseURL: BASE || undefined,
+  baseURL: BASE || undefined, // BASE가 ""이면 undefined로 처리되어 상대경로 사용
   timeout: 15000,
   headers: { "Content-Type": "application/json" },
 });
 
-/** ===============================
- * skipAuth 타입 확장
- * =============================== */
+// ... (나머지 interceptor, get, post 함수들은 모두 그대로 유지) ...
+
 declare module "axios" {
   export interface AxiosRequestConfig {
     skipAuth?: boolean;
   }
 }
 
-/** ===============================
- * 요청 인터셉터
- * =============================== */
 api.interceptors.request.use((config) => {
   const headers = axios.AxiosHeaders.from(config.headers);
   config.headers = headers;
@@ -105,9 +100,6 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-/** ===============================
- * 응답 인터셉터
- * =============================== */
 api.interceptors.response.use(
   (res) => res,
   (err: AxiosError) => {
@@ -133,9 +125,6 @@ api.interceptors.response.use(
   }
 );
 
-/** ===============================
- * HTTP 메서드 래퍼
- * =============================== */
 export async function get<T>(
   url: string,
   params?: any,

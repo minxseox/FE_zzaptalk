@@ -1,37 +1,49 @@
 // src/services/socket.ts
 import { Client, IMessage } from "@stomp/stompjs";
-import SockJS from "sockjs-client";
 import type { ChatMessageResponse, MessageType } from "../types/chat";
-// ✅ 스토어 임포트
 import { useSocketStore } from "../store/socketStore";
 import { Platform } from "react-native";
-/**
- * 🌐 WebSocket Base URL
- * .env 예)
- *   EXPO_PUBLIC_WS_BASE=http://backend:8080/ws        # Docker 내부
- *   EXPO_PUBLIC_WS_BASE=https://api.zzaptalk.com/ws   # 배포 서버
- */
-const DEFAULT_WS_BASE =
-  Platform.OS === "web" ? "/ws" : "https://api.zzaptalk.com/ws";
 
-const WS_BASE = (process.env.EXPO_PUBLIC_WS_BASE || DEFAULT_WS_BASE).replace(
-  /\/+$/,
-  ""
-);
+// ❌ SockJS는 제거합니다.
+// import SockJS from "sockjs-client";
+
+/**
+ * 🌐 WebSocket URL 생성
+ * http -> ws, https -> wss 로 자동 변환
+ */
+const getWsUrl = () => {
+  // 1. 환경변수 우선 사용
+  const envUrl = process.env.EXPO_PUBLIC_WS_BASE;
+  if (envUrl) {
+    return envUrl.replace(/^http/, "ws");
+  }
+
+  // 2. 웹 환경 (브라우저 주소 기반)
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+    // Nginx 설정에 따라 /ws 경로가 맞는지 확인 필요 (보통 /ws)
+    return `${protocol}//${host}/ws`;
+  }
+
+  // 3. 앱 환경 (기본 배포 주소)
+  return "wss://api.zzaptalk.com/ws";
+};
+
+const WS_URL = getWsUrl();
 
 // 내부 상태
 let client: Client | null = null;
-// 연결 상태를 Promise로 관리 (연결 완료 대기용)
 let connectionPromise: Promise<void> | null = null;
 
 /* ============================
- *  날짜 변환 유틸
+ * 날짜 변환 유틸 (유지)
  * ============================ */
 function toIso(v?: any): string {
   if (!v) return new Date().toISOString();
   if (v instanceof Date) return v.toISOString();
   if (typeof v === "number") {
-    const ms = v < 1e12 ? v * 1000 : v; // 초 단위 or ms 단위
+    const ms = v < 1e12 ? v * 1000 : v;
     return new Date(ms).toISOString();
   }
   const n = Number(v);
@@ -43,7 +55,7 @@ function toIso(v?: any): string {
 }
 
 /* ============================
- *  데이터 정규화
+ * 데이터 정규화 (유지)
  * ============================ */
 function normalize(body: any): ChatMessageResponse {
   const msgId =
@@ -78,30 +90,30 @@ function normalize(body: any): ChatMessageResponse {
 }
 
 /* ============================
- *  1. 소켓 연결 (전역 1회)
- *     - 구독은 별도 함수에서
+ * 1. 소켓 연결 (수정됨)
  * ============================ */
 export function connectStomp(token: string): Promise<void> {
-  // 이미 연결되어 있으면 바로 resolve
   if (client?.connected) return Promise.resolve();
-  // 이미 연결 시도 중이면 기존 Promise 재사용
   if (connectionPromise) return connectionPromise;
 
   connectionPromise = new Promise((resolve, reject) => {
     client = new Client({
-      // ✅ 백엔드가 알려준 엔드포인트: /ws
-      webSocketFactory: () => new SockJS(WS_BASE || "/ws"),
+      // ✅ [핵심] SockJS Factory 대신 brokerURL 사용
+      brokerURL: WS_URL,
 
-      // ✅ JWT 헤더
+      // ✅ 연결 헤더
       connectHeaders: {
         Authorization: `Bearer ${token}`,
       },
 
-      // 디버깅 옵션 (필요시 주석 해제)
+      // ✅ 타임아웃 방지 (Heartbeat)
+      heartbeatIncoming: 4000,
+      heartbeatOutgoing: 4000,
+
       // debug: (msg) => console.log("[STOMP]", msg),
 
       onConnect: () => {
-        console.log("✅ STOMP Connected! (Global)");
+        console.log(`✅ STOMP Connected to ${WS_URL}`);
         useSocketStore.getState().setConnected(true);
         resolve();
       },
@@ -118,12 +130,6 @@ export function connectStomp(token: string): Promise<void> {
         useSocketStore.getState().setConnected(false);
         connectionPromise = null;
       },
-
-      onWebSocketError: (event) => {
-        console.error("⚠️ WebSocket Error:", event);
-        useSocketStore.getState().setConnected(false);
-        connectionPromise = null;
-      },
     });
 
     client.activate();
@@ -133,8 +139,7 @@ export function connectStomp(token: string): Promise<void> {
 }
 
 /* ============================
- *  2. 채팅방 구독
- *     - 방 나갈 때 반환된 함수로 unsubscribe
+ * 2. 채팅방 구독 (유지)
  * ============================ */
 export function subscribeRoom(
   roomId: number,
@@ -145,11 +150,6 @@ export function subscribeRoom(
     return () => {};
   }
 
-  /**
-   * ✅ 백엔드 최종 구독 경로
-   *  - Subscribe Prefix : /topic
-   *  - 최종 경로        : /topic/chat/room/{roomId}
-   */
   const destination = `/topic/chat/room/${roomId}`;
 
   const subscription = client.subscribe(destination, (frame: IMessage) => {
@@ -161,12 +161,11 @@ export function subscribeRoom(
     }
   });
 
-  // 구독 해제 함수 반환 → useEffect cleanup에서 사용
   return () => subscription.unsubscribe();
 }
 
 /* ============================
- *  3. 연결 해제
+ * 3. 연결 해제 (유지)
  * ============================ */
 export function disconnectStomp() {
   if (client) {
@@ -179,11 +178,11 @@ export function disconnectStomp() {
 }
 
 /* ============================
- *  4. 메시지 전송
+ * 4. 메시지 전송 (유지)
  * ============================ */
 export async function sendChatMessage(
   roomId: number,
-  _senderId: number, // 현재 백엔드 DTO에는 불필요하지만, 기존 시그니처 유지
+  _senderId: number,
   content: string,
   type: MessageType = "TEXT"
 ) {
@@ -197,11 +196,6 @@ export async function sendChatMessage(
     type,
   };
 
-  /**
-   * ✅ 백엔드 최종 Publish 정보
-   *  - Publish Prefix : /app
-   *  - 최종 경로      : /app/chat/message
-   */
   client.publish({
     destination: "/app/chat/message",
     headers: { "Content-Type": "application/json" },

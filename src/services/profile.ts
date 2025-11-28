@@ -9,7 +9,7 @@ import type { Profile, UpdateProfileRequest } from "../types/profile";
  */
 export async function fetchMyProfile(): Promise<Profile> {
   try {
-    const res = await api.get<Profile>("/api/v1/users/profile");
+    const res = await api.get<Profile>("/v1/users/profile");
     return res.data;
   } catch (err) {
     const e = err as AxiosError;
@@ -25,7 +25,7 @@ export async function updateMyProfile(
   body: UpdateProfileRequest
 ): Promise<Profile> {
   try {
-    const res = await api.put<Profile>("/api/v1/users/profile", body);
+    const res = await api.put<Profile>("/v1/users/profile", body);
     return res.data;
   } catch (err) {
     const e = err as AxiosError;
@@ -40,7 +40,7 @@ export async function updateMyProfile(
  */
 export async function fetchFriendProfile(friendId: number): Promise<Profile> {
   try {
-    const res = await api.get<Profile>(`/api/v1/friends/${friendId}/profile`);
+    const res = await api.get<Profile>(`/v1/friends/${friendId}/profile`);
     return res.data;
   } catch (err) {
     const e = err as AxiosError;
