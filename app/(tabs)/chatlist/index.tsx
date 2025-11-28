@@ -16,14 +16,11 @@ import {
 import { useRouter, type Href, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-// ✅ Store Import
 import { useChatListStore } from "../../../src/store/chatListStore";
-
 import {
   getChatRoomList,
   createOrGetSingleChatRoom,
 } from "../../../src/services/chat";
-import type { ChatRoomUserListItem } from "../../../src/types/chat";
 import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
@@ -32,24 +29,25 @@ export default function ChatListScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // ✅ rooms + setRoomsFromServer 사용
+  // ✅ Store 사용
   const rooms = useChatListStore((state) => state.rooms);
   const setRoomsFromServer = useChatListStore(
     (state) => state.setRoomsFromServer
   );
 
-  // 모달 관련 상태
+  // 모달 상태
   const [showCreate, setShowCreate] = useState(false);
   const [createTab, setCreateTab] = useState<"single" | "group">("single");
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ 서버에서 목록 가져오기 + 기존 메타 유지
+  // 채팅방 목록 로딩
   const fetchRooms = async (isRefresh = false) => {
     if (!isRefresh && rooms.length === 0) setLoading(true);
     try {
       const data = await getChatRoomList();
-      setRoomsFromServer(data); // 🔥 여기!
+      // ✅ 서버 응답을 store로 머지
+      setRoomsFromServer(data);
     } catch (e) {
       console.error("[ChatList] 채팅방 목록 조회 실패:", e);
     } finally {
@@ -58,14 +56,13 @@ export default function ChatListScreen() {
     }
   };
 
-  // 화면 포커스 시 갱신
+  // 포커스 시 갱신
   useFocusEffect(
     useCallback(() => {
       fetchRooms();
     }, [])
   );
 
-  // 당겨서 새로고침
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchRooms(true);
@@ -97,7 +94,6 @@ export default function ChatListScreen() {
     try {
       setCreating(true);
       const room = await createOrGetSingleChatRoom(idNum);
-
       const r = room as any;
       const roomId = r.roomId ?? r.id;
       const roomName = r.roomName ?? r.title ?? r.name ?? "채팅방";
@@ -130,14 +126,11 @@ export default function ChatListScreen() {
         <View style={styles.headerTitleWrapper}>
           <Text style={styles.headerTitle}>채팅</Text>
         </View>
-
         <View style={styles.headerLeft} />
-
         <View style={styles.headerRight}>
           <Pressable style={styles.headerIconBtn}>
             <Ionicons name="search" size={20} style={styles.headerIcon} />
           </Pressable>
-
           <Pressable
             style={styles.headerPlusBtn}
             onPress={() => setShowCreate(true)}
@@ -199,10 +192,9 @@ export default function ChatListScreen() {
                   <Text style={styles.roomName} numberOfLines={1}>
                     {item.roomName || "알 수 없는 채팅방"}
                   </Text>
-                  {/* 필요하면 오른쪽에 시간도 나중에 추가 가능 */}
                 </View>
 
-                {/* 🔥 마지막 메시지 프리뷰 */}
+                {/* 마지막 메시지 표시 */}
                 <Text style={{ fontSize: 13, color: "#888" }} numberOfLines={1}>
                   {(item as any).lastMessage || "대화 내용이 없습니다."}
                 </Text>
@@ -212,8 +204,99 @@ export default function ChatListScreen() {
         />
       )}
 
-      {/* 아래 모달 부분은 그대로 유지 */}
-      {/* ... (생략, 기존 코드 그대로 두면 됨) */}
+      {/* 채팅방 생성 모달 */}
+      <Modal
+        visible={showCreate}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCreate(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.sheetBackdrop}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable
+            style={styles.sheetBackdropTouchable}
+            onPress={() => setShowCreate(false)}
+          />
+          <View style={styles.sheetContainer}>
+            <View style={styles.sheetTabRow}>
+              <Pressable
+                style={[
+                  styles.sheetTab,
+                  createTab === "single" && styles.sheetTabActive,
+                ]}
+                onPress={() => setCreateTab("single")}
+              >
+                <Text
+                  style={[
+                    styles.sheetTabText,
+                    createTab === "single" && styles.sheetTabTextActive,
+                  ]}
+                >
+                  개인 채팅
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.sheetTab,
+                  createTab === "group" && styles.sheetTabActive,
+                ]}
+                onPress={() => setCreateTab("group")}
+              >
+                <Text
+                  style={[
+                    styles.sheetTabText,
+                    createTab === "group" && styles.sheetTabTextActive,
+                  ]}
+                >
+                  단체 채팅
+                </Text>
+              </Pressable>
+            </View>
+
+            {createTab === "single" && (
+              <View style={styles.sheetBody}>
+                <Text style={styles.sheetLabel}>상대 사용자 ID</Text>
+                <View style={styles.sheetInputWrap}>
+                  <TextInput
+                    style={styles.sheetInput}
+                    value={partnerId}
+                    placeholder="예) 1"
+                    onChangeText={setPartnerId}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <Pressable
+                  style={styles.sheetPrimaryBtn}
+                  onPress={onCreateSingle}
+                  disabled={creating}
+                >
+                  <Text style={styles.sheetPrimaryBtnText}>
+                    {creating ? "생성 중..." : "개인 채팅 만들기"}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+
+            {createTab === "group" && (
+              <View style={styles.sheetBody}>
+                <Text style={styles.sheetLabel}>.</Text>
+                <Pressable
+                  style={styles.sheetPrimaryBtn}
+                  onPress={() =>
+                    Alert.alert("알림", "단체 채팅 기능은 준비 중입니다.")
+                  }
+                >
+                  <Text style={styles.sheetPrimaryBtnText}>
+                    단체 채팅 만들기
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
