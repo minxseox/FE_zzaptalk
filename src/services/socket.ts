@@ -4,41 +4,39 @@ import type { ChatMessageResponse, MessageType } from "../types/chat";
 import { useSocketStore } from "../store/socketStore";
 import { Platform } from "react-native";
 
-// ❌ SockJS는 제거합니다.
-// import SockJS from "sockjs-client";
+// ❌ SockJS 제거 유지
 
 /**
  * 🌐 WebSocket URL 생성
- * http -> ws, https -> wss 로 자동 변환
  */
 const getWsUrl = () => {
-  // 1. 환경변수 우선 사용
+  // 1. .env에 정의된 값이 있으면 최우선 (ws://localhost:3000/ws 등)
   const envUrl = process.env.EXPO_PUBLIC_WS_BASE;
   if (envUrl) {
-    return envUrl.replace(/^http/, "ws");
+    return envUrl;
   }
 
-  // 2. 웹 환경 (브라우저 주소 기반)
+  // 2. Web 환경: 브라우저 주소창 기반으로 자동 결정
   if (Platform.OS === "web" && typeof window !== "undefined") {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
-    // Nginx 설정에 따라 /ws 경로가 맞는지 확인 필요 (보통 /ws)
+    const host = window.location.host; // localhost:3000
+    // Nginx가 /ws 경로를 프록시한다고 가정
     return `${protocol}//${host}/ws`;
   }
 
-  // 3. 앱 환경 (기본 배포 주소)
-  return "wss://api.zzaptalk.com/ws";
+  // 3. fallback (앱 등)
+  return "ws://localhost:8080/ws";
 };
 
+// 주소 확정
 const WS_URL = getWsUrl();
+console.log(`[Socket] WS_URL: ${WS_URL}`);
 
 // 내부 상태
 let client: Client | null = null;
 let connectionPromise: Promise<void> | null = null;
 
-/* ============================
- * 날짜 변환 유틸 (유지)
- * ============================ */
+// ... (toIso, normalize 함수는 기존 코드 그대로 유지) ...
 function toIso(v?: any): string {
   if (!v) return new Date().toISOString();
   if (v instanceof Date) return v.toISOString();
@@ -54,9 +52,6 @@ function toIso(v?: any): string {
   return new Date(v).toISOString();
 }
 
-/* ============================
- * 데이터 정규화 (유지)
- * ============================ */
 function normalize(body: any): ChatMessageResponse {
   const msgId =
     typeof body?.messageId === "number" || typeof body?.messageId === "string"
@@ -90,7 +85,7 @@ function normalize(body: any): ChatMessageResponse {
 }
 
 /* ============================
- * 1. 소켓 연결 (수정됨)
+ * 1. 소켓 연결 (주소 적용 확인)
  * ============================ */
 export function connectStomp(token: string): Promise<void> {
   if (client?.connected) return Promise.resolve();
@@ -98,19 +93,15 @@ export function connectStomp(token: string): Promise<void> {
 
   connectionPromise = new Promise((resolve, reject) => {
     client = new Client({
-      // ✅ [핵심] SockJS Factory 대신 brokerURL 사용
+      // ✅ 위에서 결정한 WS_URL 사용
       brokerURL: WS_URL,
 
-      // ✅ 연결 헤더
       connectHeaders: {
         Authorization: `Bearer ${token}`,
       },
 
-      // ✅ 타임아웃 방지 (Heartbeat)
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
-
-      // debug: (msg) => console.log("[STOMP]", msg),
 
       onConnect: () => {
         console.log(`✅ STOMP Connected to ${WS_URL}`);
@@ -138,9 +129,7 @@ export function connectStomp(token: string): Promise<void> {
   return connectionPromise;
 }
 
-/* ============================
- * 2. 채팅방 구독 (유지)
- * ============================ */
+// ... (subscribeRoom, disconnectStomp, sendChatMessage 등 나머지 함수는 기존 그대로 유지) ...
 export function subscribeRoom(
   roomId: number,
   onMessage: (msg: ChatMessageResponse) => void
@@ -149,9 +138,7 @@ export function subscribeRoom(
     console.warn("⚠️ 소켓이 연결되지 않아 구독할 수 없습니다.");
     return () => {};
   }
-
   const destination = `/topic/chat/room/${roomId}`;
-
   const subscription = client.subscribe(destination, (frame: IMessage) => {
     try {
       const body = JSON.parse(frame.body);
@@ -160,13 +147,9 @@ export function subscribeRoom(
       console.error("❌ JSON Parse Error:", e);
     }
   });
-
   return () => subscription.unsubscribe();
 }
 
-/* ============================
- * 3. 연결 해제 (유지)
- * ============================ */
 export function disconnectStomp() {
   if (client) {
     client.deactivate();
@@ -177,9 +160,6 @@ export function disconnectStomp() {
   }
 }
 
-/* ============================
- * 4. 메시지 전송 (유지)
- * ============================ */
 export async function sendChatMessage(
   roomId: number,
   _senderId: number,
@@ -189,13 +169,7 @@ export async function sendChatMessage(
   if (!client || !client.connected) {
     throw new Error("STOMP not connected");
   }
-
-  const payload = {
-    roomId,
-    content,
-    type,
-  };
-
+  const payload = { roomId, content, type };
   client.publish({
     destination: "/app/chat/message",
     headers: { "Content-Type": "application/json" },

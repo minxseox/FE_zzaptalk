@@ -2,7 +2,7 @@
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import { Platform } from "react-native";
 
-// ... (ApiError 클래스는 그대로 유지) ...
+// ... (ApiError 클래스는 기존 유지) ...
 export class ApiError extends Error {
   status: number;
   data: any;
@@ -15,48 +15,34 @@ export class ApiError extends Error {
 }
 
 /** ===============================
- * BASE URL 설정 (수정됨)
+ * BASE URL 설정 (완전 수정됨)
  * =============================== */
 const getBaseUrl = () => {
-  // ✅ 환경변수에서 혹시라도 끝에 붙은 /api를 제거합니다.
-  const envBase = process.env.EXPO_PUBLIC_API_BASE?.replace(/\/api\/?$/, "");
-
-  // 📌 Native(iOS/Android)
-  if (Platform.OS === "ios" || Platform.OS === "android") {
-    if (envBase) return envBase;
-    return "https://api.zzaptalk.com";
+  // 1. 환경변수가 있으면 무조건 최우선 (끝에 /api가 있다면 제거 로직 포함 가능)
+  const envBase = process.env.EXPO_PUBLIC_API_BASE;
+  if (envBase) {
+    // 혹시라도 환경변수에 /api/ 처럼 슬래시가 중복될까봐 정리
+    return envBase.replace(/\/+$/, "");
   }
 
-  // 📌 Web(Docker 빌드 포함)
+  // 2. Web 환경: 환경변수가 없으면 '상대 경로' 사용
+  // 이렇게 하면 http://localhost:3000/api 로 자동 매핑되어 CORS가 사라집니다.
   if (Platform.OS === "web") {
-    if (envBase) return envBase;
-
-    let host = "";
-    if (typeof window !== "undefined") host = window.location.hostname;
-
-    // 2순위: 도커 + Nginx 환경 (localhost 등)
-    if (host === "localhost" || host === "127.0.0.1") {
-      // ✅ [핵심] 여기서 ""를 리턴해야 요청이 /chat/...으로 나가고
-      // Nginx가 location /chat (혹은 location /) 설정을 따르게 됩니다.
-      // 만약 Nginx가 location /api를 기다린다면, 여기서 ""를 리턴하고
-      // chat.ts에는 /chat 만 있어도 Nginx 설정(Rewrite)에 따라 작동할 수 있습니다.
-      return "";
-    }
-
-    // 3순위: 배포된 웹
-    // ✅ 여기도 끝에 /api를 붙이지 않습니다.
-    return "https://api.zzaptalk.com";
+    return "/api";
   }
 
-  return "https://api.zzaptalk.com";
+  // 3. 앱(Native) 환경: 상대 경로 불가. (개발용 IP 예시)
+  // 앱에서는 localhost가 폰 자신이 되므로 컴퓨터 IP가 필요합니다.
+  // 여기는 하드코딩보다는 .env를 꼭 설정하시기를 권장합니다.
+  return "http://10.0.2.2:8080/api";
 };
 
-// ✅ 최종적으로 한 번 더 슬래시 제거
-export const BASE = getBaseUrl().replace(/\/+$/, "");
+// ✅ 최종 BASE URL
+export const BASE = getBaseUrl();
 
 console.log(`[API] Platform: ${Platform.OS}, BASE: '${BASE}'`);
 
-// ... (AUTH_TOKEN, setApiAuthToken 등 나머지 코드는 그대로 유지) ...
+// ... (AUTH_TOKEN, setApiAuthToken 등 나머지 코드는 기존 유지) ...
 let AUTH_TOKEN: string | null = null;
 
 export function setApiAuthToken(token: string | null) {
@@ -72,15 +58,16 @@ export function clearApiAuthToken() {
   setApiAuthToken(null);
 }
 
-// ... (Axios 인스턴스 생성 유지) ...
+// ... (Axios 인스턴스 생성) ...
 export const api = axios.create({
-  baseURL: BASE || undefined, // BASE가 ""이면 undefined로 처리되어 상대경로 사용
+  baseURL: BASE,
   timeout: 15000,
   headers: { "Content-Type": "application/json" },
+  withCredentials: true, // ✅ 쿠키/세션 공유를 위해 필수
 });
 
-// ... (나머지 interceptor, get, post 함수들은 모두 그대로 유지) ...
-
+// ... (나머지 인터셉터 및 get/post 함수들은 기존 코드 그대로 사용) ...
+// (기존 코드 생략 - 변경 없음)
 declare module "axios" {
   export interface AxiosRequestConfig {
     skipAuth?: boolean;
@@ -90,13 +77,10 @@ declare module "axios" {
 api.interceptors.request.use((config) => {
   const headers = axios.AxiosHeaders.from(config.headers);
   config.headers = headers;
-
   if (config.skipAuth) return config;
-
   if (AUTH_TOKEN && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${AUTH_TOKEN}`);
   }
-
   return config;
 });
 
@@ -133,7 +117,6 @@ export async function get<T>(
   const { data } = await api.get<T>(url, { params, ...(cfg || {}) });
   return data;
 }
-
 export async function post<T>(
   url: string,
   body?: any,
@@ -142,7 +125,6 @@ export async function post<T>(
   const { data } = await api.post<T>(url, body, cfg);
   return data;
 }
-
 export async function put<T>(
   url: string,
   body?: any,
@@ -151,12 +133,10 @@ export async function put<T>(
   const { data } = await api.put<T>(url, body, cfg);
   return data;
 }
-
 export async function del<T>(url: string, cfg?: AxiosRequestConfig) {
   const { data } = await api.delete<T>(url, cfg);
   return data;
 }
-
 export async function postText(
   url: string,
   body?: any,
