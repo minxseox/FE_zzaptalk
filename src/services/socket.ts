@@ -3,14 +3,26 @@ import { Client, IMessage } from "@stomp/stompjs";
 import type { ChatMessageResponse, MessageType } from "../types/chat";
 import { useSocketStore } from "../store/socketStore";
 
-/**
- * 🌐 WebSocket URL (최종 고정)
- *
- * - Docker 환경 기본값: ws://zzaptalk-backend:8080/ws
- * - 더 이상 localhost, zzaptalk.com 같은 주소는 사용하지 않음
- */
-const WS_URL = "ws://zzaptalk-backend:8080/ws";
-console.log(`[Socket] WS_URL: ${WS_URL}`);
+/* ==================================
+ * WebSocket URL 계산 (브라우저 전용)
+ * - 정적 빌드/SSR(Node) 에서는 window 없음 → 빈 문자열 반환
+ * ================================== */
+let WS_URL: string | null = null;
+
+function resolveWsUrl(): string {
+  if (WS_URL !== null) return WS_URL;
+
+  if (typeof window === "undefined") {
+    console.warn("[Socket] window is undefined (SSR/Node), skip WS URL.");
+    WS_URL = "";
+    return WS_URL;
+  }
+
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  WS_URL = `${protocol}//${window.location.host}/ws`;
+  console.log(`[Socket] WS_URL: ${WS_URL}`);
+  return WS_URL;
+}
 
 // 내부 상태
 let client: Client | null = null;
@@ -76,9 +88,17 @@ export function connectStomp(token: string): Promise<void> {
   if (client?.connected) return Promise.resolve();
   if (connectionPromise) return connectionPromise;
 
+  const url = resolveWsUrl();
+
+  // SSR/빌드 환경에서는 그냥 스킵
+  if (!url) {
+    console.warn("[Socket] No WS URL (probably SSR), skip connectStomp.");
+    return Promise.resolve();
+  }
+
   connectionPromise = new Promise((resolve, reject) => {
     client = new Client({
-      brokerURL: WS_URL,
+      brokerURL: url,
       connectHeaders: {
         Authorization: `Bearer ${token}`,
       },
@@ -86,7 +106,7 @@ export function connectStomp(token: string): Promise<void> {
       heartbeatOutgoing: 4000,
 
       onConnect: () => {
-        console.log(`✅ STOMP Connected to ${WS_URL}`);
+        console.log(`✅ STOMP Connected to ${url}`);
         useSocketStore.getState().setConnected(true);
         resolve();
       },

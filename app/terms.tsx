@@ -19,8 +19,7 @@ export default function TermsScreen() {
       </Text>
 
       <Text style={{ lineHeight: 20 }}>
-        {/* TODO: 여기 짭톡 이용약관 전문 넣기 */}이 곳에 짭톡 서비스 이용약관
-        내용을 작성해 주세요.
+        {/* TODO: 여기 짭톡 이용약관 전문 넣기 */}임시 짭톡 서비스 이용약관 내용
       </Text>
     </ScrollView>
   );

@@ -19,8 +19,8 @@ export default function PolicyScreen() {
       </Text>
 
       <Text style={{ lineHeight: 20 }}>
-        {/* TODO: 여기 짭톡 개인정보처리방침 전문 넣기 */}이 곳에 짭톡 서비스의
-        개인정보 처리방침 내용을 작성해 주세요.
+        {/* TODO: 여기 짭톡 개인정보처리방침 전문 넣기 */}임시 개인정보 처리방침
+        내용
       </Text>
     </ScrollView>
   );

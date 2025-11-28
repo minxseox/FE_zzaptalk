@@ -1,9 +1,9 @@
 services:
   frontend:
-    image: minxseox/my-expo-web:latest # 또는 build: . 쓰고 직접 빌드해도 됨
+    build: .
     container_name: zzaptalk-frontend
     restart: always
     ports:
-      - "3000:80" # 브라우저: http://localhost:3000
+      - "3000:80"
     extra_hosts:
       - "host.docker.internal:host-gateway"
