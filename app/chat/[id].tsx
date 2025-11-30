@@ -52,13 +52,16 @@ import { parseJwt } from "../../src/lib/jwt";
 
 import { fetchFriendProfile } from "../../src/services/profile";
 
+/** ✅ socket 모듈 로드(실패를 숨기지 않음) */
 let sendChatMessageRaw: any;
 let subscribeRoom: any;
 try {
   const mod = require("../../src/services/socket");
   sendChatMessageRaw = mod.sendChatMessage;
   subscribeRoom = mod.subscribeRoom;
-} catch {}
+} catch (e) {
+  console.warn("[chat] failed to load socket module:", e);
+}
 
 function toNumberSafe(v: unknown): number | null {
   const n = typeof v === "number" ? v : Number(v);
@@ -146,10 +149,9 @@ async function getMyId(): Promise<number | null> {
   }
 }
 
+/** ✅ arity(length) 의존 제거: 항상 (roomId, myId, content)로 호출 */
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
-  if (sendChatMessageRaw.length === 2)
-    return sendChatMessageRaw(roomId, content);
   return sendChatMessageRaw(roomId, myId, content);
 }
 
@@ -201,6 +203,22 @@ export default function ChatRoomScreen() {
 
   const prevLenRef = useRef(0);
   const scrollingRef = useRef(false);
+
+  /** ✅ dedupe용: 현재 화면에 존재하는 messageId들 */
+  const idSetRef = useRef<Set<string>>(new Set());
+
+  /** ✅ optimistic 교체용: 내가 보낸 임시 메시지 기록 */
+  const pendingOptimisticRef = useRef<
+    Map<number, { content: string; sentAtMs: number }>
+  >(new Map());
+
+  useEffect(() => setMounted(true), []);
+
+  // messages가 바뀔 때마다 id set 갱신
+  useEffect(() => {
+    idSetRef.current = new Set(messages.map((m) => String(m.messageId)));
+  }, [messages]);
+
   const safeScrollToBottom = useCallback((animated = true) => {
     if (scrollingRef.current) return;
     scrollingRef.current = true;
@@ -214,8 +232,6 @@ export default function ChatRoomScreen() {
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
-
-  useEffect(() => setMounted(true), []);
 
   const redirectOnce = useCallback(
     (to: Href) => {
@@ -318,7 +334,30 @@ export default function ChatRoomScreen() {
     });
   }, [messages]);
 
-  // ✅ 소켓 구독
+  /** ✅ 현재 store 기준으로 메시지 삭제(클로저 꼬임 방지) */
+  const removeMessageByIdNow = useCallback(
+    (msgId: number) => {
+      const st = useChatStore.getState();
+      const cur = st.messagesByRoom[roomId] ?? EMPTY;
+      st.setMessages(
+        roomId,
+        cur.filter((m) => String(m.messageId) !== String(msgId))
+      );
+
+      // sendStatus 정리
+      setSendStatus((prev) => {
+        const next = { ...prev };
+        delete next[String(msgId)];
+        return next;
+      });
+
+      // dedupe set 정리
+      idSetRef.current.delete(String(msgId));
+    },
+    [roomId]
+  );
+
+  // ✅ 소켓 구독 (dedupe + optimistic 교체)
   useEffect(() => {
     if (!subscribeRoom) return;
 
@@ -327,12 +366,52 @@ export default function ChatRoomScreen() {
 
     const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
       const normalized = normalizeRestMessage(m);
+      const key = String(normalized.messageId);
+
+      // ✅ 1) messageId 기준 중복 방지
+      if (idSetRef.current.has(key)) return;
+
+      // ✅ 2) 내 메시지면 optimistic(임시) 교체 시도
+      if (myId != null && normalized.senderId === myId) {
+        const now = Date.now();
+        const serverAt = Date.parse(normalized.createdAt);
+        const baseMs = Number.isFinite(serverAt) ? serverAt : now;
+
+        let targetId: number | null = null;
+        let best = Infinity;
+
+        for (const [optId, info] of pendingOptimisticRef.current.entries()) {
+          if (info.content !== normalized.content) continue;
+
+          // 서버 시간/지금 시간 둘 다 고려해서 근접한 optimistic 하나 선택
+          const diff = Math.min(
+            Math.abs(baseMs - info.sentAtMs),
+            Math.abs(now - info.sentAtMs)
+          );
+
+          if (diff < 15000 && diff < best) {
+            best = diff;
+            targetId = optId;
+          }
+        }
+
+        if (targetId != null) {
+          pendingOptimisticRef.current.delete(targetId);
+          removeMessageByIdNow(targetId);
+        }
+      }
+
+      // ✅ 3) 서버 메시지 추가
+      idSetRef.current.add(key);
       addMsg(roomId, normalized);
       updateLast(roomId, normalized.content, normalized.createdAt, true);
+
+      // ✅ 4) 혹시 남아있던 sending 상태 제거(서버 메시지가 왔으니 성공으로 간주)
+      // (서버 messageId는 optimisticId와 다르므로, 여기선 굳이 sendStatus 건드리지 않아도 됨)
     });
 
     return () => unsub?.();
-  }, [roomId]);
+  }, [roomId, myId, removeMessageByIdNow]);
 
   if (!navReady) return null;
   if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
@@ -347,15 +426,12 @@ export default function ChatRoomScreen() {
     });
   }, []);
 
+  /** ✅ 실패 액션시트에서 “삭제”는 현재 store 기준으로 삭제 */
   const deleteLocalMessage = useCallback(
     (msgId: number) => {
-      setMessages(
-        roomId,
-        messages.filter((m) => Number(m.messageId) !== Number(msgId))
-      );
-      markStatus(msgId, undefined);
+      removeMessageByIdNow(msgId);
     },
-    [messages, markStatus, roomId, setMessages]
+    [removeMessageByIdNow]
   );
 
   const sendContent = useCallback(
@@ -365,13 +441,15 @@ export default function ChatRoomScreen() {
       markStatus(msgId, "sending");
       try {
         if (sendChatMessageRaw) await sendCompat(roomId, myId, content);
-        markStatus(msgId, undefined); // 성공
-        await syncMessages();
+
+        // ✅ 전송 성공: 여기서 전체 재조회(syncMessages) 하지 않음
+        // 소켓에서 진짜 메시지가 돌아오면 optimistic 교체로 정리됨.
+        markStatus(msgId, undefined);
       } catch {
         markStatus(msgId, "failed");
       }
     },
-    [myId, markStatus, roomId, syncMessages]
+    [myId, markStatus, roomId]
   );
 
   const openFailActionSheet = useCallback(
@@ -410,7 +488,7 @@ export default function ChatRoomScreen() {
     if (!t || !myId) return;
 
     const nowIso = new Date().toISOString();
-    const optimisticId = Date.now();
+    const optimisticId = Date.now() + Math.floor(Math.random() * 1000); // ✅ 충돌 약간 줄임
 
     const optimistic: ChatMessageResponse = {
       messageId: optimisticId,
@@ -422,6 +500,12 @@ export default function ChatRoomScreen() {
       senderName: "Me",
       type: "TEXT",
     };
+
+    // ✅ optimistic 기록(나중에 소켓 오면 교체)
+    pendingOptimisticRef.current.set(optimisticId, {
+      content: t,
+      sentAtMs: Date.now(),
+    });
 
     addMessage(roomId, optimistic);
     updateRoomLastMessage(roomId, t, nowIso, true);
@@ -488,7 +572,6 @@ export default function ChatRoomScreen() {
   }, []);
 
   const onScrollToIndexFailed = useCallback((info: any) => {
-    // 높이 측정이 안되어 실패하면, 대충 offset으로 이동 후 재시도
     const wait = 80;
     flatRef.current?.scrollToOffset({
       offset: Math.max(0, info.averageItemLength * info.index),
@@ -533,7 +616,7 @@ export default function ChatRoomScreen() {
       const dateText = mounted ? formatDateSafe(item.createdAt) : "";
       const timeText = mounted ? formatTimeSafe(item.createdAt) : "";
 
-      const local = sendStatus[String(item.messageId)]; // "sending" | "failed" | undefined
+      const local = sendStatus[String(item.messageId)];
       const status = mine ? local ?? "sent" : "sent";
 
       return (
@@ -708,7 +791,7 @@ export default function ChatRoomScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* 프로필 모달 (기존 유지) */}
+      {/* ✅ 프로필 모달 */}
       <Modal
         visible={profileModalVisible}
         transparent
