@@ -16,24 +16,26 @@ export class ApiError extends Error {
 }
 
 /* ===============================
- * BASE URL 설정 (최종 버전)
+ * BASE URL 설정 (최종 해결 버전)
  *
- * ❗ 요구사항:
- *  - Docker 환경 기본값은 항상 "/api"
- *  - NGINX 가 /api → zzaptalk-backend:8080 으로 프록시
- *  - EXPO_PUBLIC_API_BASE 로 덮어쓸 수 있음
+ * 1. 로컬 개발 시: http://localhost:8080/api (강제 지정)
+ * 2. 도커/배포 시: /api (Nginx 프록시 사용)
  * =============================== */
 const getBaseUrl = () => {
-  // 1. .env 에서 EXPO_PUBLIC_API_BASE 가 오면 최우선 사용
+  // 1. .env 에서 EXPO_PUBLIC_API_BASE 가 오면 최우선 사용 (유연성 유지)
   const envBase = process.env.EXPO_PUBLIC_API_BASE;
   if (envBase) {
-    // 슬래시 중복 방지
     return envBase.replace(/\/+$/, "");
   }
 
-  // 2. 기본값: /api
-  //  - 웹:   http://<host>/api
-  //  - 도커: NGINX 가 /api → zzaptalk-backend:8080 으로 포워딩
+  // 2. 개발 환경 (내 컴퓨터에서 npm start / npx expo start 할 때)
+  //    ❗중요: 백엔드 포트가 8080이 아니면 숫자를 변경하세요!
+  if (process.env.NODE_ENV === "development") {
+    return "http://localhost:8080/api";
+  }
+
+  // 3. 기본값: /api
+  //    - 도커/배포 환경에서는 NGINX가 처리하므로 상대 경로 사용
   return "/api";
 };
 

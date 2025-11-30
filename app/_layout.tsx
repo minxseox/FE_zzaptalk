@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Platform, View, ActivityIndicator } from "react-native";
 import { useFonts } from "expo-font";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import "../global-icons.css";
+//import "../global-icons.css";
 
 import { restoreSession, onAuthChange } from "../src/lib/authSession";
 import { loadTokenWithExpiry } from "../src/lib/authStorage";
@@ -21,7 +21,7 @@ const norm = (p: string) => {
 };
 
 // 개발용 우회 (나중에 실제 배포 시 false 또는 제거)
-const DEV_BYPASS_AUTH = true;
+const DEV_BYPASS_AUTH = false;
 
 export default function RootLayout() {
   // ✅ 클라이언트 전용 렌더링 (Hydration 오류 방지)
