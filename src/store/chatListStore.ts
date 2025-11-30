@@ -84,10 +84,10 @@ export const useChatListStore = create<ChatListState>((set) => ({
     set((state) => {
       const index = state.rooms.findIndex((r) => r.roomId === roomId);
 
-      // ✅ 방이 없으면 조용히 무시 (에러 방지)
+      // ✅ 방이 없으면 상태 변경 없음 (명시적)
       if (index === -1) {
         console.warn(`[ChatListStore] Room ${roomId} not found`);
-        return { rooms: state.rooms };
+        return {}; // 아무 업데이트도 안 함
       }
 
       const target = state.rooms[index];
