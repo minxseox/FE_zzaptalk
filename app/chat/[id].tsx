@@ -1,4 +1,4 @@
-// app/chat/[id].tsx..
+// app/chat/[id].tsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -25,13 +25,11 @@ import {
 } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-// ✅ 스타일 모듈 (named exports)
 import {
   chatRoomStyles,
   chatRoomModalStyles,
 } from "../../src/styles/chat/ChatRoom.module";
 
-// ✅ Zustand Store
 import { useChatStore } from "../../src/store/chatStore";
 import { useChatListStore } from "../../src/store/chatListStore";
 
@@ -41,10 +39,8 @@ import type { ChatMessageResponse } from "../../src/types/chat";
 import { loadTokenWithExpiry } from "../../src/lib/authStorage";
 import { parseJwt } from "../../src/lib/jwt";
 
-// ✅ 친구 프로필 조회
 import { fetchFriendProfile } from "../../src/services/profile";
 
-// 소켓 모듈 (SSR 방지용 require)
 let sendChatMessageRaw: any;
 let subscribeRoom: any;
 try {
@@ -53,28 +49,6 @@ try {
   subscribeRoom = mod.subscribeRoom;
 } catch {}
 
-/* ===============================
- * 날짜 유틸
- * =============================== */
-
-// ✅ 하루 비교 (UTC 기준으로 timezone 무관하게 비교)
-function isSameDay(d1: string, d2: string) {
-  try {
-    const date1 = new Date(d1);
-    const date2 = new Date(d2);
-
-    // UTC 기준으로 비교하여 timezone 문제 해결
-    return (
-      date1.getUTCFullYear() === date2.getUTCFullYear() &&
-      date1.getUTCMonth() === date2.getUTCMonth() &&
-      date1.getUTCDate() === date2.getUTCDate()
-    );
-  } catch {
-    return false;
-  }
-}
-
-// 어떤 값이 오든 ISO 문자열로 정규화
 function toIsoSafe(v: any): string {
   if (!v) return new Date().toISOString();
   if (v instanceof Date) return v.toISOString();
@@ -93,10 +67,8 @@ function toIsoSafe(v: any): string {
   return new Date(v).toISOString();
 }
 
-// ✅ 클라이언트 전용 날짜 포맷팅 (Hydration 에러 방지)
 function formatDateSafe(isoString: string): string {
   if (typeof window === "undefined") {
-    // 서버에서는 ISO 그대로 반환
     return isoString;
   }
 
@@ -114,7 +86,6 @@ function formatDateSafe(isoString: string): string {
 
 function formatTimeSafe(isoString: string): string {
   if (typeof window === "undefined") {
-    // 서버에서는 빈 문자열
     return "";
   }
 
@@ -128,7 +99,6 @@ function formatTimeSafe(isoString: string): string {
   }
 }
 
-// REST로 받은 메시지도 createdAt/sentAt 정규화
 function normalizeRestMessage(m: ChatMessageResponse): ChatMessageResponse {
   return {
     ...m,
@@ -137,7 +107,6 @@ function normalizeRestMessage(m: ChatMessageResponse): ChatMessageResponse {
   };
 }
 
-// 내 ID 가져오기
 async function getMyId(): Promise<number | null> {
   try {
     const saved = await loadTokenWithExpiry();
@@ -150,18 +119,14 @@ async function getMyId(): Promise<number | null> {
   }
 }
 
-// 전송 호환성 함수
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
-  // (roomId, content)
   if (sendChatMessageRaw.length === 2) {
     return sendChatMessageRaw(roomId, content);
   }
-  // (roomId, myId, content)
   return sendChatMessageRaw(roomId, myId, content);
 }
 
-// ✅ 스크롤 헬퍼 함수 (유틸로 분리) - flatRef 타입 any로 수정
 function scrollToBottomUtil(flatRef: React.RefObject<any>) {
   requestAnimationFrame(() => {
     flatRef.current?.scrollToEnd({ animated: true });
@@ -171,6 +136,7 @@ function scrollToBottomUtil(flatRef: React.RefObject<any>) {
 export default function ChatRoomScreen() {
   const { id, title } = useLocalSearchParams<{ id?: string; title?: string }>();
   const roomId = Number(id);
+  const isValidRoom = Number.isFinite(roomId);
 
   const router = useRouter();
   const rootNav = useRootNavigationState();
@@ -179,13 +145,13 @@ export default function ChatRoomScreen() {
   const headerTitle =
     typeof title === "string" && title.length > 0 ? title : "채팅";
 
-  // ✅ 클라이언트 마운트 상태 추가 (Hydration 에러 방지)
   const [mounted, setMounted] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ✅ 방별 메시지 사용
-  const messages = useChatStore((state) => state.messagesByRoom[roomId] ?? []);
+  const messages = useChatStore((state) =>
+    isValidRoom ? state.messagesByRoom[roomId] ?? [] : []
+  );
   const setMessages = useChatStore((state) => state.setMessages);
   const addMessage = useChatStore((state) => state.addMessage);
 
@@ -197,21 +163,24 @@ export default function ChatRoomScreen() {
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
 
-  // ✅ flatRef 타입을 any로 수정
   const flatRef = useRef<any>(null);
   const lastRedirectRef = useRef<Href | null>(null);
-
-  // ✅ 입력란 ref (전송 후 포커스용)
   const inputRef = useRef<TextInput>(null);
 
-  // 프로필 모달
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
 
-  // ✅ 클라이언트 마운트 확인
+  // ✅ 모든 Hook은 조건부 return 전에 위치!
+
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      setMyId(await getMyId());
+    })();
   }, []);
 
   const redirectOnce = useCallback(
@@ -224,45 +193,91 @@ export default function ChatRoomScreen() {
     [router, navReady]
   );
 
+  // ✅ 초기 로딩
   useEffect(() => {
-    (async () => {
-      setMyId(await getMyId());
-    })();
-  }, []);
+    if (!navReady || !isValidRoom) return;
 
-  // 초기 로딩
-  const initialLoad = useCallback(async () => {
-    try {
+    let cancelled = false;
+
+    const load = async () => {
       try {
-        await getChatRoomList();
+        try {
+          await getChatRoomList();
+        } catch (e: any) {
+          if (e?.status === 401) {
+            redirectOnce("/login" as Href);
+            return;
+          }
+        }
+
+        const data = await getChatMessages(roomId);
+        if (cancelled) return;
+
+        const normalized = data.map(normalizeRestMessage);
+        const sorted = [...normalized].sort(
+          (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
+        );
+
+        useChatStore.getState().setMessages(roomId, sorted);
+
+        if (sorted.length > 0) {
+          const last = sorted[sorted.length - 1];
+          useChatListStore
+            .getState()
+            .updateRoomLastMessage(roomId, last.content, last.createdAt, true);
+        }
+
+        scrollToBottomUtil(flatRef);
       } catch (e: any) {
-        if (e?.status === 401) return redirectOnce("/login" as Href);
+        if (e?.status === 401) {
+          redirectOnce("/login" as Href);
+          return;
+        }
+        Alert.alert("오류", e?.message || "불러오기 실패");
+      } finally {
+        if (!cancelled) {
+          setInitialLoading(false);
+        }
       }
+    };
 
-      const data = await getChatMessages(roomId);
-      const normalized = data.map(normalizeRestMessage);
-      const sorted = [...normalized].sort(
-        (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
-      );
+    load();
+    useChatListStore.getState().resetUnreadCount(roomId);
 
-      setMessages(roomId, sorted);
+    return () => {
+      cancelled = true;
+    };
+  }, [navReady, isValidRoom, roomId, redirectOnce]);
 
-      // ✅ 추가: 마지막 메시지를 채팅방 목록에 반영
-      if (sorted.length > 0) {
-        const last = sorted[sorted.length - 1];
-        updateRoomLastMessage(roomId, last.content, last.createdAt, true);
-      }
+  // ✅ 소켓 구독
+  useEffect(() => {
+    if (!subscribeRoom || !isValidRoom) return;
 
+    const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
+      console.log("📩 WS 메시지 수신:", m);
+
+      const normalized = normalizeRestMessage(m);
+      useChatStore.getState().addMessage(roomId, normalized);
       scrollToBottomUtil(flatRef);
-    } catch (e: any) {
-      if (e?.status === 401) return redirectOnce("/login" as Href);
-      Alert.alert("오류", e?.message || "불러오기 실패");
-    } finally {
-      setInitialLoading(false);
-    }
-  }, [roomId, redirectOnce, setMessages, updateRoomLastMessage]);
+
+      useChatListStore
+        .getState()
+        .updateRoomLastMessage(
+          roomId,
+          normalized.content,
+          normalized.createdAt,
+          true
+        );
+    });
+
+    return () => {
+      unsub?.();
+    };
+  }, [roomId, isValidRoom]);
 
   const syncMessages = useCallback(async () => {
+    if (!isValidRoom) return;
+
     setSyncing(true);
     try {
       const data = await getChatMessages(roomId);
@@ -270,65 +285,29 @@ export default function ChatRoomScreen() {
       const sorted = [...normalized].sort(
         (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
       );
-      setMessages(roomId, sorted);
 
-      // ✅ 추가: 동기화 후에도 마지막 메시지 반영
+      useChatStore.getState().setMessages(roomId, sorted);
+
       if (sorted.length > 0) {
         const last = sorted[sorted.length - 1];
-        updateRoomLastMessage(roomId, last.content, last.createdAt, true);
+        useChatListStore
+          .getState()
+          .updateRoomLastMessage(roomId, last.content, last.createdAt, true);
       }
 
       scrollToBottomUtil(flatRef);
     } catch (e: any) {
-      if (e?.status === 401) return redirectOnce("/login" as Href);
+      if (e?.status === 401) {
+        redirectOnce("/login" as Href);
+      }
     } finally {
       setSyncing(false);
     }
-  }, [roomId, redirectOnce, setMessages, updateRoomLastMessage]);
+  }, [roomId, isValidRoom, redirectOnce]);
 
-  useEffect(() => {
-    if (!navReady) return;
-    initialLoad();
-    resetUnreadCount(roomId);
-  }, [navReady, initialLoad, roomId, resetUnreadCount]);
-
-  if (!navReady) return null;
-  if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
-
-  // 🔥 소켓 구독 (무한 루프 방지 버전 + scrollToBottom 의존성 제거)
-  useEffect(() => {
-    if (!subscribeRoom) return;
-
-    // ✅ Zustand setter는 getState()로 고정된 참조 사용
-    const addMsg = useChatStore.getState().addMessage;
-    const updateLast = useChatListStore.getState().updateRoomLastMessage;
-
-    const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
-      console.log("📩 WS 메시지 수신:", m);
-
-      const normalized = normalizeRestMessage(m);
-      addMsg(roomId, normalized);
-
-      // ✅ 직접 스크롤 (scrollToBottom 의존성 제거)
-      scrollToBottomUtil(flatRef);
-
-      updateLast(
-        roomId,
-        normalized.content,
-        normalized.createdAt,
-        true // 방 안에 있으니까 읽은 상태
-      );
-    });
-
-    return () => {
-      unsub?.();
-    };
-  }, [roomId]); // ✅ scrollToBottom 제거!
-
-  // ✅ onSend에서도 scrollToBottom 의존성 제거
   const onSend = useCallback(async () => {
     const t = text.trim();
-    if (!t || !myId) return;
+    if (!t || !myId || !isValidRoom) return;
 
     const nowIso = new Date().toISOString();
     const optimistic: ChatMessageResponse = {
@@ -342,11 +321,10 @@ export default function ChatRoomScreen() {
       type: "TEXT",
     };
 
-    addMessage(roomId, optimistic);
-    updateRoomLastMessage(roomId, t, nowIso, true);
+    useChatStore.getState().addMessage(roomId, optimistic);
+    useChatListStore.getState().updateRoomLastMessage(roomId, t, nowIso, true);
     setText("");
 
-    // ✅ 직접 스크롤
     scrollToBottomUtil(flatRef);
 
     try {
@@ -357,43 +335,36 @@ export default function ChatRoomScreen() {
     } catch {
       Alert.alert("전송 실패", "메시지를 보낼 수 없어요.");
     } finally {
-      // ✅ 전송 후 입력란에 포커스
       inputRef.current?.focus();
     }
-  }, [text, myId, roomId, syncMessages, addMessage, updateRoomLastMessage]); // ✅ scrollToBottom 제거!
+  }, [text, myId, roomId, isValidRoom, syncMessages]);
 
-  // 프로필 클릭
-  const handlePressAvatar = async (senderId: number) => {
-    if (senderId === myId) return;
+  const handlePressAvatar = useCallback(
+    async (senderId: number) => {
+      if (senderId === myId) return;
 
-    setProfileLoading(true);
-    setProfileModalVisible(true);
-    try {
-      const data = await fetchFriendProfile(senderId);
-      setSelectedProfile(data);
-    } catch (e) {
-      console.error(e);
-      Alert.alert("알림", "프로필 정보를 불러올 수 없습니다.");
-      setProfileModalVisible(false);
-    } finally {
-      setProfileLoading(false);
-    }
-  };
+      setProfileLoading(true);
+      setProfileModalVisible(true);
+      try {
+        const data = await fetchFriendProfile(senderId);
+        setSelectedProfile(data);
+      } catch (e) {
+        console.error(e);
+        Alert.alert("알림", "프로필 정보를 불러올 수 없습니다.");
+        setProfileModalVisible(false);
+      } finally {
+        setProfileLoading(false);
+      }
+    },
+    [myId]
+  );
 
-  // ✅ 리스트 렌더링 - messages 의존성 제거!
   const renderItem = useCallback(
     ({ item, index }: { item: ChatMessageResponse; index: number }) => {
       const mine = myId != null && item.senderId === myId;
-
-      // 🔹 날짜 구분자: 첫 메시지일 때만
-      // (FlatList가 아이템 순서를 보장하므로 index로 판단)
       const showDateSeparator = index === 0;
-
-      // 🔹 시간 표시: 첫 메시지일 때만
-      // (복잡한 1분 차이 계산 제거 - 성능 최적화)
       const showTimeLabel = index === 0;
 
-      // ✅ 클라이언트 전용 포맷팅 (Hydration 에러 방지)
       const dateText = mounted ? formatDateSafe(item.createdAt) : "";
       const timeLabel = mounted ? formatTimeSafe(item.createdAt) : "";
 
@@ -473,8 +444,12 @@ export default function ChatRoomScreen() {
         </View>
       );
     },
-    [myId, mounted] // ✅ messages 제거! (매우 중요)
+    [myId, mounted, handlePressAvatar]
   );
+
+  // ✅ 조건부 return은 모든 Hook 선언 후에!
+  if (!navReady) return null;
+  if (!isValidRoom) return <Redirect href={"/chatlist" as Href} />;
 
   return (
     <KeyboardAvoidingView
@@ -482,7 +457,6 @@ export default function ChatRoomScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
     >
-      {/* 헤더 */}
       <View style={chatRoomStyles.header}>
         <Pressable
           onPress={() => router.back()}
@@ -506,7 +480,6 @@ export default function ChatRoomScreen() {
         </View>
       </View>
 
-      {/* 채팅 목록 */}
       {initialLoading ? (
         <View
           style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
@@ -525,7 +498,6 @@ export default function ChatRoomScreen() {
         />
       )}
 
-      {/* 입력창 */}
       <View style={chatRoomStyles.inputBar}>
         <Pressable style={chatRoomStyles.circleBtn}>
           <Ionicons name="add" size={20} color="#444" />
@@ -556,7 +528,6 @@ export default function ChatRoomScreen() {
         </View>
       </View>
 
-      {/* 친구 프로필 모달 */}
       <Modal
         visible={profileModalVisible}
         transparent
