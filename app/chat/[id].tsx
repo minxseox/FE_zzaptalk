@@ -57,15 +57,21 @@ try {
  * 날짜 유틸
  * =============================== */
 
-// 하루 비교
+// ✅ 하루 비교 (UTC 기준으로 timezone 무관하게 비교)
 function isSameDay(d1: string, d2: string) {
-  const date1 = new Date(d1);
-  const date2 = new Date(d2);
-  return (
-    date1.getFullYear() === date2.getFullYear() &&
-    date1.getMonth() === date2.getMonth() &&
-    date1.getDate() === date2.getDate()
-  );
+  try {
+    const date1 = new Date(d1);
+    const date2 = new Date(d2);
+
+    // UTC 기준으로 비교하여 timezone 문제 해결
+    return (
+      date1.getUTCFullYear() === date2.getUTCFullYear() &&
+      date1.getUTCMonth() === date2.getUTCMonth() &&
+      date1.getUTCDate() === date2.getUTCDate()
+    );
+  } catch {
+    return false;
+  }
 }
 
 // 어떤 값이 오든 ISO 문자열로 정규화
@@ -194,6 +200,9 @@ export default function ChatRoomScreen() {
   // ✅ flatRef 타입을 any로 수정
   const flatRef = useRef<any>(null);
   const lastRedirectRef = useRef<Href | null>(null);
+
+  // ✅ 입력란 ref (전송 후 포커스용)
+  const inputRef = useRef<TextInput>(null);
 
   // 프로필 모달
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -347,6 +356,9 @@ export default function ChatRoomScreen() {
       await syncMessages();
     } catch {
       Alert.alert("전송 실패", "메시지를 보낼 수 없어요.");
+    } finally {
+      // ✅ 전송 후 입력란에 포커스
+      inputRef.current?.focus();
     }
   }, [text, myId, roomId, syncMessages, addMessage, updateRoomLastMessage]); // ✅ scrollToBottom 제거!
 
@@ -543,6 +555,7 @@ export default function ChatRoomScreen() {
         </Pressable>
         <View style={chatRoomStyles.inputWrap}>
           <TextInput
+            ref={inputRef}
             placeholder="메세지 입력"
             value={text}
             onChangeText={setText}
