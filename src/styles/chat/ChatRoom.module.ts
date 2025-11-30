@@ -193,4 +193,8 @@ export const chatRoomModalStyles = StyleSheet.create({
     gap: 6,
   },
   actionText: { color: "#fff", fontWeight: "600", fontSize: 15 },
+  avatarSpacer: { width: 34, marginRight: 8 }, // ✅ 아바타 자리 유지
+
+  timeMine: { textAlign: "left", marginRight: 4, marginLeft: 0 }, // ✅ 내 시간(왼쪽)
+  timeOther: { textAlign: "right", marginLeft: 4, marginRight: 0 }, // ✅ 상대 시간(오른쪽)
 });

@@ -1,4 +1,3 @@
-// app/chat/[id].tsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -7,8 +6,8 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   Platform,
-  Pressable,
   Text,
+  Pressable,
   TextInput,
   View,
   Modal,
@@ -25,12 +24,17 @@ import {
 } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
+import type { TextInput } from "react-native";
 // ✅ 스타일
 import {
   chatRoomStyles,
   chatRoomModalStyles,
 } from "../../src/styles/chat/ChatRoom.module";
+
+// ✅ 컴포넌트
+import ChatHeader from "../../src/components/chat/ChatHeader";
+import MessageBubble from "../../src/components/chat/MessageBubble";
+import MessageInput from "../../src/components/chat/MessageInput";
 
 // ✅ Zustand Store
 import { useChatStore } from "../../src/store/chatStore";
@@ -77,7 +81,6 @@ function toIsoSafe(v: any): string {
   return new Date(v).toISOString();
 }
 
-// Hydration 안전: 웹에서만 locale 포맷
 function formatDateSafe(isoString: string): string {
   if (typeof window === "undefined") return isoString;
   try {
@@ -95,11 +98,10 @@ function formatDateSafe(isoString: string): string {
 function formatTimeSafe(isoString: string): string {
   if (typeof window === "undefined") return "";
   try {
-    // ✅ 오전/오후 포함
     return new Intl.DateTimeFormat("ko-KR", {
       hour: "numeric",
       minute: "2-digit",
-      hour12: true,
+      hour12: true, // ✅ 오전/오후
     }).format(new Date(isoString));
   } catch {
     return "";
@@ -163,7 +165,6 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ✅ 방별 메시지
   const messages = useChatStore((s) => s.messagesByRoom[roomId] ?? EMPTY);
   const setMessages = useChatStore((s) => s.setMessages);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -177,13 +178,13 @@ export default function ChatRoomScreen() {
   const [myId, setMyId] = useState<number | null>(null);
 
   const flatRef = useRef<FlatList<ChatMessageResponse> | null>(null);
+  // ❌ const inputRef = useRef<TextInput | null>(null);
   const inputRef = useRef<TextInput>(null);
+
   const lastRedirectRef = useRef<Href | null>(null);
 
-  // ✅ 입력바 높이 측정 → FlatList paddingBottom에 반영
   const [inputBarH, setInputBarH] = useState(0);
 
-  // ✅ 스크롤 제어
   const prevLenRef = useRef(0);
   const scrollingRef = useRef(false);
   const safeScrollToBottom = useCallback((animated = true) => {
@@ -217,7 +218,6 @@ export default function ChatRoomScreen() {
   }, []);
 
   const onBack = useCallback(() => {
-    // ✅ 히스토리 없으면 chatlist로
     try {
       const canGoBack = (router as any).canGoBack?.();
       if (canGoBack) router.back();
@@ -227,7 +227,6 @@ export default function ChatRoomScreen() {
     }
   }, [router]);
 
-  // ✅ 초기 데이터 로딩
   const initialLoad = useCallback(async () => {
     try {
       try {
@@ -283,7 +282,6 @@ export default function ChatRoomScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navReady, roomId]);
 
-  // ✅ 새 메시지 추가되면 자동 스크롤 (렌더 끝난 후)
   useEffect(() => {
     if (!mounted) return;
     if (messages.length > prevLenRef.current) {
@@ -295,7 +293,6 @@ export default function ChatRoomScreen() {
   if (!navReady) return null;
   if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
 
-  // ✅ 소켓 구독
   useEffect(() => {
     if (!subscribeRoom) return;
 
@@ -306,7 +303,6 @@ export default function ChatRoomScreen() {
       const normalized = normalizeRestMessage(m);
       addMsg(roomId, normalized);
       updateLast(roomId, normalized.content, normalized.createdAt, true);
-      // 스크롤은 messages.length effect에서 처리
     });
 
     return () => unsub?.();
@@ -332,15 +328,12 @@ export default function ChatRoomScreen() {
     updateRoomLastMessage(roomId, t, nowIso, true);
     setText("");
 
-    // ✅ 렌더 완료 “다음 프레임”에 한번 더 내려야 입력바에 안 가림
     requestAnimationFrame(() => {
       requestAnimationFrame(() => safeScrollToBottom(true));
     });
 
     try {
-      if (sendChatMessageRaw) {
-        await sendCompat(roomId, myId, t);
-      }
+      if (sendChatMessageRaw) await sendCompat(roomId, myId, t);
       await syncMessages();
     } catch {
       Alert.alert("전송 실패", "메시지를 보낼 수 없어요.");
@@ -385,23 +378,19 @@ export default function ChatRoomScreen() {
       const prev = messages[index - 1];
       const next = messages[index + 1];
 
-      // ✅ 날짜 구분선: 첫 메시지 or 날짜 바뀔 때
       const showDateSeparator =
         index === 0 || !sameDay(prev?.createdAt, item.createdAt);
 
-      // ✅ 연속 메시지 판단
       const isFirstOfRun = !prev || prev.senderId !== item.senderId;
       const isLastOfRun = !next || next.senderId !== item.senderId;
 
-      // ✅ 상대방: 아바타/이름은 run의 첫 말풍선에만
       const showAvatar = !mine && isFirstOfRun;
       const showName = !mine && isFirstOfRun;
 
-      // ✅ 시간: run의 마지막 말풍선에만 (단순 규칙)
-      const showTimeLabel = isLastOfRun;
+      const showTime = isLastOfRun;
 
       const dateText = mounted ? formatDateSafe(item.createdAt) : "";
-      const timeLabel = mounted ? formatTimeSafe(item.createdAt) : "";
+      const timeText = mounted ? formatTimeSafe(item.createdAt) : "";
 
       return (
         <View>
@@ -411,73 +400,16 @@ export default function ChatRoomScreen() {
             </View>
           )}
 
-          <View
-            style={[
-              chatRoomStyles.msgRow,
-              mine ? chatRoomStyles.msgRowMine : chatRoomStyles.msgRowOther,
-            ]}
-          >
-            {/* ✅ 상대 run 후속 메시지는 아바타 자리만 유지 */}
-            {!mine ? (
-              showAvatar ? (
-                <Pressable
-                  style={chatRoomStyles.avatarContainer}
-                  onPress={() => handlePressAvatar(item.senderId)}
-                >
-                  <View style={chatRoomStyles.avatarPlaceholder}>
-                    <Text style={chatRoomStyles.avatarInitial}>
-                      {item.senderName?.charAt(0) ?? "?"}
-                    </Text>
-                  </View>
-                </Pressable>
-              ) : (
-                <View style={chatRoomStyles.avatarSpacer} />
-              )
-            ) : null}
-
-            <View style={chatRoomStyles.bubbleLine}>
-              {/* ✅ 내 시간: 말풍선 왼쪽 아래 */}
-              {mine && showTimeLabel && mounted && (
-                <Text
-                  style={[chatRoomStyles.timeBeside, chatRoomStyles.timeMine]}
-                >
-                  {timeLabel}
-                </Text>
-              )}
-
-              <View
-                style={[
-                  chatRoomStyles.bubble,
-                  mine ? chatRoomStyles.bubbleMine : chatRoomStyles.bubbleOther,
-                ]}
-              >
-                {showName && item.senderName ? (
-                  <Text style={chatRoomStyles.senderName}>
-                    {item.senderName}
-                  </Text>
-                ) : null}
-
-                <Text
-                  style={
-                    mine
-                      ? chatRoomStyles.msgTextMine
-                      : chatRoomStyles.msgTextOther
-                  }
-                >
-                  {item.content}
-                </Text>
-              </View>
-
-              {/* ✅ 상대 시간: 말풍선 오른쪽 아래 */}
-              {!mine && showTimeLabel && mounted && (
-                <Text
-                  style={[chatRoomStyles.timeBeside, chatRoomStyles.timeOther]}
-                >
-                  {timeLabel}
-                </Text>
-              )}
-            </View>
-          </View>
+          <MessageBubble
+            mine={mine}
+            content={item.content}
+            senderName={item.senderName}
+            showName={showName}
+            showAvatar={showAvatar}
+            onPressAvatar={() => handlePressAvatar(item.senderId)}
+            timeLabel={timeText}
+            showTime={showTime}
+          />
         </View>
       );
     },
@@ -490,27 +422,7 @@ export default function ChatRoomScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
     >
-      <View style={chatRoomStyles.header}>
-        <Pressable onPress={onBack} style={chatRoomStyles.headerBtn}>
-          <Ionicons name="chevron-back" size={22} color="#111" />
-        </Pressable>
-
-        <Text style={chatRoomStyles.headerTitle}>{headerTitle}</Text>
-
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Pressable style={chatRoomStyles.headerBtn}>
-            <Ionicons name="search" size={20} color="#111" />
-          </Pressable>
-          <Pressable style={chatRoomStyles.headerBtn}>
-            <Ionicons
-              name="settings-outline"
-              size={20}
-              color="#111"
-              style={{ opacity: syncing ? 0.6 : 1 }}
-            />
-          </Pressable>
-        </View>
-      </View>
+      <ChatHeader title={headerTitle} syncing={syncing} onBack={onBack} />
 
       {initialLoading ? (
         <View
@@ -527,46 +439,20 @@ export default function ChatRoomScreen() {
           renderItem={renderItem}
           contentContainerStyle={{
             padding: 12,
-            paddingBottom: inputBarH + insets.bottom + 12, // ✅ 입력바/세이프영역만큼 여백
+            paddingBottom: inputBarH + insets.bottom + 12,
           }}
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
           extraData={mounted}
         />
       )}
 
-      <View
-        style={chatRoomStyles.inputBar}
-        onLayout={(e) => setInputBarH(e.nativeEvent.layout.height)}
-      >
-        <Pressable style={chatRoomStyles.circleBtn}>
-          <Ionicons name="add" size={20} color="#444" />
-        </Pressable>
-        <Pressable style={chatRoomStyles.circleBtn}>
-          <Ionicons name="happy-outline" size={20} color="#444" />
-        </Pressable>
-
-        <View style={chatRoomStyles.inputWrap}>
-          <TextInput
-            ref={inputRef}
-            placeholder="메세지 입력"
-            value={text}
-            onChangeText={setText}
-            style={chatRoomStyles.input}
-            onSubmitEditing={onSend}
-            returnKeyType="send"
-          />
-          <Pressable
-            style={[
-              chatRoomStyles.sendFab,
-              !text.trim() && { backgroundColor: "#D8D8E8" },
-            ]}
-            onPress={onSend}
-            disabled={!text.trim()}
-          >
-            <Ionicons name="paper-plane" size={16} color="#fff" />
-          </Pressable>
-        </View>
-      </View>
+      <MessageInput
+        text={text}
+        setText={setText}
+        onSend={onSend}
+        inputRef={inputRef}
+        onHeight={setInputBarH}
+      />
 
       <Modal
         visible={profileModalVisible}
