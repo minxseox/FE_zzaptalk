@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { chatRoomStyles } from "../../styles/chat/ChatRoom.module";
 
 type Props = {
@@ -15,6 +16,10 @@ type Props = {
   // time
   timeLabel?: string;
   showTime: boolean;
+
+  // ✅ send status
+  failed?: boolean;
+  onRetry?: () => void;
 };
 
 export default function MessageBubble({
@@ -26,6 +31,8 @@ export default function MessageBubble({
   onPressAvatar,
   timeLabel = "",
   showTime,
+  failed = false,
+  onRetry,
 }: Props) {
   return (
     <View
@@ -52,7 +59,7 @@ export default function MessageBubble({
       ) : null}
 
       <View style={chatRoomStyles.bubbleLine}>
-        {/* 내 시간: 말풍선 왼쪽 아래 */}
+        {/* ✅ 내 시간: 말풍선 왼쪽 아래 */}
         {mine && showTime ? (
           <Text style={[chatRoomStyles.timeBeside, chatRoomStyles.timeMine]}>
             {timeLabel}
@@ -78,11 +85,23 @@ export default function MessageBubble({
           </Text>
         </View>
 
-        {/* 상대 시간: 말풍선 오른쪽 아래 */}
+        {/* ✅ 상대 시간: 말풍선 오른쪽 아래 */}
         {!mine && showTime ? (
           <Text style={[chatRoomStyles.timeBeside, chatRoomStyles.timeOther]}>
             {timeLabel}
           </Text>
+        ) : null}
+
+        {/* ✅ 카톡 느낌 실패 UI: 내 메시지 실패일 때만 */}
+        {mine && failed ? (
+          <Pressable
+            onPress={onRetry}
+            style={chatRoomStyles.failWrap}
+            hitSlop={8}
+          >
+            <Ionicons name="alert-circle" size={16} color="#FF3B30" />
+            <Text style={chatRoomStyles.failText}>다시 보내기</Text>
+          </Pressable>
         ) : null}
       </View>
     </View>

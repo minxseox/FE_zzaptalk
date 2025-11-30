@@ -1,7 +1,7 @@
-// src/styles/chat/ChatRoom.module.ts
-import { StyleSheet } from "react-native";
+import { Platform, StyleSheet } from "react-native";
 
 const PURPLE = "#9997FF";
+const FAIL_RED = "#E34B4B";
 
 export const chatRoomStyles = StyleSheet.create({
   header: {
@@ -43,9 +43,6 @@ export const chatRoomStyles = StyleSheet.create({
   msgRowOther: { justifyContent: "flex-start" },
 
   avatarContainer: { marginRight: 8, alignSelf: "flex-start" },
-  // ✅ 연속 메시지일 때 자리 유지
-  avatarSpacer: { width: 34, marginRight: 8 },
-
   avatarPlaceholder: {
     width: 34,
     height: 34,
@@ -56,11 +53,11 @@ export const chatRoomStyles = StyleSheet.create({
   },
   avatarInitial: { fontSize: 14, color: "#666", fontWeight: "600" },
 
-  bubbleLine: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    maxWidth: "88%",
-  },
+  // ✅ 연속 메시지일 때 아바타 자리 유지용
+  avatarSpacer: { width: 34, marginRight: 8 },
+
+  bubbleLine: { flexDirection: "row", alignItems: "flex-end", maxWidth: "88%" },
+
   bubble: {
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -69,21 +66,67 @@ export const chatRoomStyles = StyleSheet.create({
   },
   bubbleMine: { backgroundColor: PURPLE, borderBottomRightRadius: 6 },
   bubbleOther: { backgroundColor: "#EFEFEF", borderBottomLeftRadius: 6 },
-
+  failWrap: {
+    marginLeft: 6,
+    alignSelf: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  failText: {
+    fontSize: 11,
+    color: "#FF3B30",
+    fontWeight: "600",
+  },
   senderName: { fontSize: 12, color: "#666", marginBottom: 4 },
-
   msgTextMine: { color: "#fff", fontSize: 15, lineHeight: 21 },
   msgTextOther: { color: "#111", fontSize: 15, lineHeight: 21 },
 
-  timeBeside: {
-    fontSize: 11,
-    color: "#8E8E8E",
-    marginBottom: 2, // ✅ 말풍선 아래 느낌
+  timeBeside: { fontSize: 11, color: "#8E8E8E", alignSelf: "flex-end" },
+  // ✅ 너 요구대로: 내 시간은 왼쪽 아래, 상대는 오른쪽 아래 느낌
+  timeMine: { textAlign: "left", marginRight: 4 },
+  timeOther: { textAlign: "right", marginLeft: 4 },
+
+  // ✅ 실패 아이콘(카톡 느낌)
+  failIconBtn: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#FFE8E8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 6, // 말풍선 바로 왼쪽
   },
-  // ✅ 내 말풍선: 왼쪽 아래
-  timeMine: { textAlign: "left", marginRight: 6 },
-  // ✅ 상대 말풍선: 오른쪽 아래
-  timeOther: { textAlign: "right", marginLeft: 6 },
+  failIcon: {
+    fontSize: 12,
+    color: FAIL_RED,
+    fontWeight: "900",
+    lineHeight: 12,
+  },
+
+  // ✅ 전송중/재전송 영역
+  statusRow: {
+    marginTop: 4,
+    flexDirection: "row",
+  },
+  statusRowMine: {
+    justifyContent: "flex-end",
+  },
+  resendBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: "#FFE7EA",
+  },
+  resendText: {
+    fontSize: 12,
+    color: FAIL_RED,
+    fontWeight: "700",
+  },
+  sendingText: {
+    fontSize: 12,
+    color: "#9A9AA3",
+  },
 
   inputBar: {
     flexDirection: "row",
@@ -118,6 +161,15 @@ export const chatRoomStyles = StyleSheet.create({
     fontSize: 14,
     color: "#111",
     maxHeight: 120,
+
+    // ✅ 포커스 박스(특히 web outline) 제거
+    ...(Platform.OS === "web"
+      ? ({
+          outlineStyle: "none",
+          outlineWidth: 0,
+          boxShadow: "none",
+        } as any)
+      : null),
   },
   sendFab: {
     position: "absolute",
@@ -193,8 +245,4 @@ export const chatRoomModalStyles = StyleSheet.create({
     gap: 6,
   },
   actionText: { color: "#fff", fontWeight: "600", fontSize: 15 },
-  avatarSpacer: { width: 34, marginRight: 8 }, // ✅ 아바타 자리 유지
-
-  timeMine: { textAlign: "left", marginRight: 4, marginLeft: 0 }, // ✅ 내 시간(왼쪽)
-  timeOther: { textAlign: "right", marginLeft: 4, marginRight: 0 }, // ✅ 상대 시간(오른쪽)
 });

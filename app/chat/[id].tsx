@@ -24,7 +24,7 @@ import {
 } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { TextInput } from "react-native";
+
 // ✅ 스타일
 import {
   chatRoomStyles,
@@ -61,8 +61,13 @@ try {
 } catch {}
 
 /* ===============================
- * 날짜 유틸
+ * 유틸
  * =============================== */
+function toNumberSafe(v: unknown): number | null {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function toIsoSafe(v: any): string {
   if (!v) return new Date().toISOString();
   if (v instanceof Date) return v.toISOString();
@@ -109,8 +114,13 @@ function formatTimeSafe(isoString: string): string {
 }
 
 function normalizeRestMessage(m: ChatMessageResponse): ChatMessageResponse {
+  const senderIdNum = toNumberSafe((m as any).senderId) ?? 0;
+  const roomIdNum = toNumberSafe((m as any).roomId) ?? (m as any).roomId ?? 0;
+
   return {
     ...m,
+    roomId: roomIdNum,
+    senderId: senderIdNum,
     createdAt: toIsoSafe((m as any).createdAt),
     sentAt: toIsoSafe((m as any).sentAt ?? (m as any).createdAt),
   };
@@ -148,6 +158,9 @@ async function sendCompat(roomId: number, myId: number, content: string) {
 
 const EMPTY: ChatMessageResponse[] = [];
 
+type SendState = "sending" | "failed";
+type SendStatusMap = Record<string, SendState>;
+
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
 
@@ -178,12 +191,13 @@ export default function ChatRoomScreen() {
   const [myId, setMyId] = useState<number | null>(null);
 
   const flatRef = useRef<FlatList<ChatMessageResponse> | null>(null);
-  // ❌ const inputRef = useRef<TextInput | null>(null);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInput | null>(null);
 
   const lastRedirectRef = useRef<Href | null>(null);
-
   const [inputBarH, setInputBarH] = useState(0);
+
+  // ✅ 전송 상태(실패/전송중) 맵: messageId 기준
+  const [sendStatus, setSendStatus] = useState<SendStatusMap>({});
 
   const prevLenRef = useRef(0);
   const scrollingRef = useRef(false);
@@ -290,6 +304,20 @@ export default function ChatRoomScreen() {
     prevLenRef.current = messages.length;
   }, [messages.length, mounted, safeScrollToBottom]);
 
+  // ✅ 메시지 목록 기준으로 status map 정리(남아있는 키 정리)
+  useEffect(() => {
+    const ids = new Set(messages.map((m) => String(m.messageId)));
+    setSendStatus((prev) => {
+      let changed = false;
+      const next: SendStatusMap = {};
+      for (const [k, v] of Object.entries(prev)) {
+        if (ids.has(k)) next[k] = v;
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [messages]);
+
   if (!navReady) return null;
   if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
 
@@ -308,13 +336,41 @@ export default function ChatRoomScreen() {
     return () => unsub?.();
   }, [roomId]);
 
+  const markStatus = useCallback((msgId: number, s?: SendState) => {
+    const key = String(msgId);
+    setSendStatus((prev) => {
+      const next = { ...prev };
+      if (!s) delete next[key];
+      else next[key] = s;
+      return next;
+    });
+  }, []);
+
+  const sendContent = useCallback(
+    async (msgId: number, content: string) => {
+      if (!myId) return;
+
+      markStatus(msgId, "sending");
+      try {
+        if (sendChatMessageRaw) await sendCompat(roomId, myId, content);
+        markStatus(msgId, undefined); // ✅ 성공 → 실패 UI 제거
+        await syncMessages();
+      } catch {
+        markStatus(msgId, "failed");
+      }
+    },
+    [myId, markStatus, roomId, syncMessages]
+  );
+
   const onSend = useCallback(async () => {
     const t = text.trim();
     if (!t || !myId) return;
 
     const nowIso = new Date().toISOString();
+    const optimisticId = Date.now();
+
     const optimistic: ChatMessageResponse = {
-      messageId: Date.now(),
+      messageId: optimisticId,
       roomId,
       senderId: myId,
       content: t,
@@ -332,22 +388,18 @@ export default function ChatRoomScreen() {
       requestAnimationFrame(() => safeScrollToBottom(true));
     });
 
-    try {
-      if (sendChatMessageRaw) await sendCompat(roomId, myId, t);
-      await syncMessages();
-    } catch {
-      Alert.alert("전송 실패", "메시지를 보낼 수 없어요.");
-    } finally {
-      inputRef.current?.focus();
-    }
+    // ✅ 실제 전송 + 실패 처리
+    await sendContent(optimisticId, t);
+
+    inputRef.current?.focus();
   }, [
     text,
     myId,
     roomId,
-    syncMessages,
     addMessage,
     updateRoomLastMessage,
     safeScrollToBottom,
+    sendContent,
   ]);
 
   const handlePressAvatar = useCallback(
@@ -392,6 +444,8 @@ export default function ChatRoomScreen() {
       const dateText = mounted ? formatDateSafe(item.createdAt) : "";
       const timeText = mounted ? formatTimeSafe(item.createdAt) : "";
 
+      const failed = mine && sendStatus[String(item.messageId)] === "failed";
+
       return (
         <View>
           {showDateSeparator && mounted && (
@@ -406,14 +460,19 @@ export default function ChatRoomScreen() {
             senderName={item.senderName}
             showName={showName}
             showAvatar={showAvatar}
-            onPressAvatar={() => handlePressAvatar(item.senderId)}
+            onPressAvatar={() => {
+              const sid = toNumberSafe((item as any).senderId);
+              if (sid != null) handlePressAvatar(sid);
+            }}
             timeLabel={timeText}
             showTime={showTime}
+            failed={failed}
+            onRetry={() => sendContent(item.messageId as any, item.content)}
           />
         </View>
       );
     },
-    [myId, mounted, messages, handlePressAvatar]
+    [myId, mounted, messages, handlePressAvatar, sendStatus, sendContent]
   );
 
   return (
