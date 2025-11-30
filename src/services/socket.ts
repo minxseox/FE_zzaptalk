@@ -23,12 +23,39 @@ function resolveWsUrl(): string {
   return WS_URL;
 }
 
-// 내부 상태
-let client: Client | null = null;
-let connectionPromise: Promise<void> | null = null;
-let currentToken: string | null = null;
+/* ==================================
+ * 내부 상태
+ * ================================== */
+// ✅ (선택) HMR/dev에서 모듈이 재로딩돼도 중복 클라이언트 안 생기게 글로벌에 저장
+const GLOBAL_KEY = "__ZZAPTALK_STOMP_SINGLETON__";
+type GlobalStompState = {
+  client: Client | null;
+  connectionPromise: Promise<void> | null;
+  currentToken: string | null;
+};
 
-// ✅ 재연결 설정
+const g = globalThis as any;
+const globalState: GlobalStompState =
+  g[GLOBAL_KEY] ??
+  (g[GLOBAL_KEY] = {
+    client: null,
+    connectionPromise: null,
+    currentToken: null,
+  });
+
+let client: Client | null = globalState.client;
+let connectionPromise: Promise<void> | null = globalState.connectionPromise;
+let currentToken: string | null = globalState.currentToken;
+
+function syncGlobal() {
+  globalState.client = client;
+  globalState.connectionPromise = connectionPromise;
+  globalState.currentToken = currentToken;
+}
+
+/* ==================================
+ * ✅ 재연결 설정
+ * ================================== */
 const RECONNECT_CONFIG = {
   maxAttempts: 5,
   delayMs: 3000,
@@ -36,23 +63,37 @@ const RECONNECT_CONFIG = {
   reconnectTimer: null as ReturnType<typeof setTimeout> | null,
 };
 
+function clearReconnectTimer() {
+  if (RECONNECT_CONFIG.reconnectTimer) {
+    clearTimeout(RECONNECT_CONFIG.reconnectTimer);
+    RECONNECT_CONFIG.reconnectTimer = null;
+  }
+}
+
+async function hardResetClient() {
+  try {
+    if (client) {
+      // ✅ 이벤트 남아있는 activate 클라이언트를 확실히 종료
+      await client.deactivate();
+    }
+  } catch {}
+  client = null;
+  connectionPromise = null;
+  syncGlobal();
+}
+
 /* ==================================
  * 유틸: 날짜 → ISO 문자열
  * ================================== */
 export function toIso(v?: any): string {
   if (!v) return new Date().toISOString();
-
-  // Date 객체 그대로
   if (v instanceof Date) return v.toISOString();
 
-  // 숫자인 경우
   if (typeof v === "number") {
-    // 초 단위 → 밀리초 변환
     const ms = v < 1e12 ? v * 1000 : v;
     return new Date(ms).toISOString();
   }
 
-  // 문자열인 경우
   const n = Number(v);
   if (!Number.isNaN(n) && String(n) === String(v)) {
     const ms = n < 1e12 ? n * 1000 : n;
@@ -84,21 +125,18 @@ function normalize(body: any): ChatMessageResponse {
     ? body.type
     : "TEXT";
 
+  // ✅ messageId가 없을 때 Date.now()만 쓰면 중복 가능 → 조금 더 유니크하게
+  const fallbackId = Date.now() + Math.floor(Math.random() * 1000);
+
   return {
-    messageId: body?.messageId ?? body?.id ?? Date.now(),
-
+    messageId: body?.messageId ?? body?.id ?? fallbackId,
     roomId: Number(body?.roomId ?? body?.room_id),
-
     senderId: Number(body?.senderId ?? body?.sender_id ?? body?.sender),
-
     senderName: String(
       body?.senderName ?? body?.senderNickname ?? body?.sender_name ?? ""
     ),
-
     content: String(body?.content ?? body?.message ?? ""),
-
     type: typ,
-
     createdAt: toIso(rawCreated),
     sentAt: toIso(rawSent),
   };
@@ -108,10 +146,8 @@ function normalize(body: any): ChatMessageResponse {
  * ✅ 재연결 로직
  * ================================== */
 function scheduleReconnect() {
-  // 이미 재연결 타이머가 있으면 무시
   if (RECONNECT_CONFIG.reconnectTimer) return;
 
-  // 최대 시도 횟수 초과
   if (RECONNECT_CONFIG.currentAttempt >= RECONNECT_CONFIG.maxAttempts) {
     console.error("❌ [Socket] 재연결 최대 시도 횟수 초과");
     useSocketStore.getState().setConnected(false);
@@ -126,13 +162,15 @@ function scheduleReconnect() {
   RECONNECT_CONFIG.reconnectTimer = setTimeout(() => {
     RECONNECT_CONFIG.reconnectTimer = null;
 
-    if (currentToken) {
-      connectStomp(currentToken).catch((err) => {
+    if (!currentToken) return;
+
+    // ✅ 재연결 전에 클라이언트 정리(쌓임 방지)
+    hardResetClient().finally(() => {
+      connectStomp(currentToken!).catch((err) => {
         console.error("❌ [Socket] 재연결 실패:", err);
-        // 실패 시 다시 재연결 시도
         scheduleReconnect();
       });
-    }
+    });
   }, RECONNECT_CONFIG.delayMs);
 }
 
@@ -140,8 +178,8 @@ function scheduleReconnect() {
  * STOMP CONNECT
  * ================================== */
 export function connectStomp(token: string): Promise<void> {
-  // ✅ 토큰 저장 (재연결 시 사용)
   currentToken = token;
+  syncGlobal();
 
   if (client?.connected) {
     console.log("✅ [Socket] 이미 연결됨");
@@ -156,63 +194,86 @@ export function connectStomp(token: string): Promise<void> {
   const url = resolveWsUrl();
   if (!url) return Promise.resolve();
 
-  connectionPromise = new Promise((resolve, reject) => {
-    client = new Client({
-      brokerURL: url,
-      connectHeaders: {
-        Authorization: `Bearer ${token}`,
-      },
-      heartbeatIncoming: 4000,
-      heartbeatOutgoing: 4000,
+  connectionPromise = new Promise(async (resolve, reject) => {
+    try {
+      // ✅ 남아있는 client가 있으면 정리
+      if (client && !client.connected) {
+        await hardResetClient();
+      }
 
-      onConnect: () => {
-        console.log("✅ [Socket] STOMP Connected");
-        useSocketStore.getState().setConnected(true);
+      client = new Client({
+        brokerURL: url,
+        connectHeaders: {
+          Authorization: `Bearer ${token}`,
+        },
+        heartbeatIncoming: 4000,
+        heartbeatOutgoing: 4000,
+        reconnectDelay: 0, // ✅ 우리가 직접 재연결 관리
 
-        // ✅ 재연결 성공 시 카운터 리셋
-        RECONNECT_CONFIG.currentAttempt = 0;
-        if (RECONNECT_CONFIG.reconnectTimer) {
-          clearTimeout(RECONNECT_CONFIG.reconnectTimer);
-          RECONNECT_CONFIG.reconnectTimer = null;
-        }
+        onConnect: () => {
+          console.log("✅ [Socket] STOMP Connected");
+          useSocketStore.getState().setConnected(true);
 
-        resolve();
-      },
+          RECONNECT_CONFIG.currentAttempt = 0;
+          clearReconnectTimer();
 
-      onStompError: (frame) => {
-        console.error("❌ [Socket] STOMP Error:", frame.headers["message"]);
-        useSocketStore.getState().setConnected(false);
-        connectionPromise = null;
+          // ✅ 연결 성공하면 promise 정리
+          connectionPromise = null;
+          syncGlobal();
 
-        // ✅ 401 에러가 아니면 재연결 시도
-        const errorMsg = frame.headers["message"] || "";
-        if (!errorMsg.includes("401") && !errorMsg.includes("Unauthorized")) {
+          resolve();
+        },
+
+        onStompError: (frame) => {
+          const msg = frame.headers["message"] || "";
+          console.error("❌ [Socket] STOMP Error:", msg);
+
+          useSocketStore.getState().setConnected(false);
+
+          connectionPromise = null;
+          syncGlobal();
+
+          if (!msg.includes("401") && !msg.includes("Unauthorized")) {
+            scheduleReconnect();
+          }
+
+          reject(new Error(msg));
+        },
+
+        onWebSocketClose: (evt) => {
+          console.log("🔌 [Socket] WebSocket Closed", evt?.code, evt?.reason);
+          useSocketStore.getState().setConnected(false);
+
+          connectionPromise = null;
+          syncGlobal();
+
+          if (evt?.code !== 1000) {
+            scheduleReconnect();
+          }
+        },
+
+        onWebSocketError: (evt) => {
+          console.error("❌ [Socket] WebSocket Error:", evt);
+          useSocketStore.getState().setConnected(false);
+
+          // ✅ 에러났는데 close가 안 올 수도 있으니 promise 정리
+          connectionPromise = null;
+          syncGlobal();
+
           scheduleReconnect();
-        }
+        },
+      });
 
-        reject(new Error(frame.headers["message"]));
-      },
-
-      onWebSocketClose: (evt) => {
-        console.log("🔌 [Socket] WebSocket Closed", evt?.code, evt?.reason);
-        useSocketStore.getState().setConnected(false);
-        connectionPromise = null;
-
-        // ✅ 정상 종료(1000)가 아니면 재연결 시도
-        if (evt?.code !== 1000) {
-          scheduleReconnect();
-        }
-      },
-
-      onWebSocketError: (evt) => {
-        console.error("❌ [Socket] WebSocket Error:", evt);
-        useSocketStore.getState().setConnected(false);
-      },
-    });
-
-    client.activate();
+      syncGlobal();
+      client.activate();
+    } catch (e) {
+      connectionPromise = null;
+      syncGlobal();
+      reject(e);
+    }
   });
 
+  syncGlobal();
   return connectionPromise;
 }
 
@@ -221,17 +282,10 @@ export function connectStomp(token: string): Promise<void> {
  * ================================== */
 export async function updateSocketToken(newToken: string): Promise<void> {
   console.log("🔄 [Socket] 토큰 업데이트 및 재연결");
-
-  // 기존 연결 종료
-  if (client?.connected) {
-    client.deactivate();
-  }
-
-  client = null;
-  connectionPromise = null;
   currentToken = newToken;
+  syncGlobal();
 
-  // 새 토큰으로 재연결
+  await hardResetClient();
   return connectStomp(newToken);
 }
 
@@ -262,32 +316,29 @@ export function subscribeRoom(
   });
 
   return () => {
-    console.log(`📡 [Socket] 구독 해제: ${destination}`);
-    subscription.unsubscribe();
+    try {
+      console.log(`📡 [Socket] 구독 해제: ${destination}`);
+      subscription.unsubscribe();
+    } catch (e) {
+      console.warn("⚠️ [Socket] unsubscribe 실패(무시):", e);
+    }
   };
 }
 
 /* ==================================
  * STOMP DISCONNECT
  * ================================== */
-export function disconnectStomp() {
+export async function disconnectStomp() {
   console.log("🔴 [Socket] 연결 종료 요청");
 
-  // ✅ 재연결 타이머 정리
-  if (RECONNECT_CONFIG.reconnectTimer) {
-    clearTimeout(RECONNECT_CONFIG.reconnectTimer);
-    RECONNECT_CONFIG.reconnectTimer = null;
-  }
+  clearReconnectTimer();
   RECONNECT_CONFIG.currentAttempt = 0;
 
-  if (client) {
-    client.deactivate();
-    client = null;
-    connectionPromise = null;
-    currentToken = null;
-    useSocketStore.getState().setConnected(false);
-    console.log("🔴 [Socket] STOMP Disconnected");
-  }
+  currentToken = null;
+  useSocketStore.getState().setConnected(false);
+
+  await hardResetClient();
+  console.log("🔴 [Socket] STOMP Disconnected");
 }
 
 /* ==================================
@@ -305,17 +356,13 @@ export async function sendChatMessage(
 
   const payload = { roomId, content, type };
 
-  try {
-    client.publish({
-      destination: "/app/chat/message",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    console.log("📤 [Socket] 메시지 전송:", payload);
-  } catch (err) {
-    console.error("❌ [Socket] 메시지 전송 실패:", err);
-    throw err;
-  }
+  client.publish({
+    destination: "/app/chat/message",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  console.log("📤 [Socket] 메시지 전송:", payload);
 }
 
 /* ==================================

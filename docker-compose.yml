@@ -1,6 +1,6 @@
 services:
   frontend:
-    build: .
+    image: ghcr.io/minxseox/fe_zzaptalk:${IMAGE_TAG:-latest}
     container_name: zzaptalk-frontend
     restart: always
     ports:

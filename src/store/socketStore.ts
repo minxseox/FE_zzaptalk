@@ -2,11 +2,15 @@
 import { create } from "zustand";
 
 interface SocketState {
-  isConnected: boolean; // 연결 상태 (true/false)
+  isConnected: boolean;
   setConnected: (status: boolean) => void;
 }
 
-export const useSocketStore = create<SocketState>((set) => ({
+export const useSocketStore = create<SocketState>((set, get) => ({
   isConnected: false,
-  setConnected: (status) => set({ isConnected: status }),
+  setConnected: (status) => {
+    // ✅ 같은 값이면 업데이트 안 해서 불필요한 렌더 방지
+    if (get().isConnected === status) return;
+    set({ isConnected: status });
+  },
 }));

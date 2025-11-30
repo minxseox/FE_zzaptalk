@@ -1,5 +1,11 @@
 // app/chat/[id].tsx
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -25,23 +31,28 @@ import {
 } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
+// ✅ 스타일
 import {
   chatRoomStyles,
   chatRoomModalStyles,
 } from "../../src/styles/chat/ChatRoom.module";
 
+// ✅ Zustand Store
 import { useChatStore } from "../../src/store/chatStore";
 import { useChatListStore } from "../../src/store/chatListStore";
-import { useSocketStore } from "../../src/store/socketStore"; // ✅ 추가
 
+// ✅ API
 import { getChatMessages, getChatRoomList } from "../../src/services/chat";
 import type { ChatMessageResponse } from "../../src/types/chat";
 
+// ✅ Auth
 import { loadTokenWithExpiry } from "../../src/lib/authStorage";
 import { parseJwt } from "../../src/lib/jwt";
 
+// ✅ 친구 프로필 조회
 import { fetchFriendProfile } from "../../src/services/profile";
 
+// 소켓 모듈 (SSR 방지용 require)
 let sendChatMessageRaw: any;
 let subscribeRoom: any;
 try {
@@ -50,6 +61,9 @@ try {
   subscribeRoom = mod.subscribeRoom;
 } catch {}
 
+/* ===============================
+ * 날짜 유틸
+ * =============================== */
 function toIsoSafe(v: any): string {
   if (!v) return new Date().toISOString();
   if (v instanceof Date) return v.toISOString();
@@ -69,10 +83,7 @@ function toIsoSafe(v: any): string {
 }
 
 function formatDateSafe(isoString: string): string {
-  if (typeof window === "undefined") {
-    return isoString;
-  }
-
+  if (typeof window === "undefined") return isoString;
   try {
     return new Date(isoString).toLocaleDateString("ko-KR", {
       year: "numeric",
@@ -86,10 +97,7 @@ function formatDateSafe(isoString: string): string {
 }
 
 function formatTimeSafe(isoString: string): string {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
+  if (typeof window === "undefined") return "";
   try {
     return new Date(isoString).toLocaleTimeString([], {
       hour: "2-digit",
@@ -122,22 +130,16 @@ async function getMyId(): Promise<number | null> {
 
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
-  if (sendChatMessageRaw.length === 2) {
+  if (sendChatMessageRaw.length === 2)
     return sendChatMessageRaw(roomId, content);
-  }
   return sendChatMessageRaw(roomId, myId, content);
 }
 
-function scrollToBottomUtil(flatRef: React.RefObject<any>) {
-  requestAnimationFrame(() => {
-    flatRef.current?.scrollToEnd({ animated: true });
-  });
-}
+const EMPTY: ChatMessageResponse[] = [];
 
 export default function ChatRoomScreen() {
   const { id, title } = useLocalSearchParams<{ id?: string; title?: string }>();
   const roomId = Number(id);
-  const isValidRoom = Number.isFinite(roomId);
 
   const router = useRouter();
   const rootNav = useRootNavigationState();
@@ -150,33 +152,43 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ✅ 소켓 연결 상태 구독
-  const isSocketConnected = useSocketStore((state) => state.isConnected);
+  // ✅ 방별 메시지 사용 (빈 배열은 고정 상수로)
+  const messages = useChatStore((s) => s.messagesByRoom[roomId] ?? EMPTY);
+  const setMessages = useChatStore((s) => s.setMessages);
+  const addMessage = useChatStore((s) => s.addMessage);
 
-  const messages = useChatStore((state) =>
-    isValidRoom ? state.messagesByRoom[roomId] ?? [] : []
+  const updateRoomLastMessage = useChatListStore(
+    (s) => s.updateRoomLastMessage
   );
+  const resetUnreadCount = useChatListStore((s) => s.resetUnreadCount);
 
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
 
-  const flatRef = useRef<any>(null);
-  const lastRedirectRef = useRef<Href | null>(null);
+  const flatRef = useRef<FlatList<ChatMessageResponse> | null>(null);
   const inputRef = useRef<TextInput>(null);
+  const lastRedirectRef = useRef<Href | null>(null);
 
+  // ✅ 스크롤 제어(무한 루프 방지)
+  const prevLenRef = useRef(0);
+  const scrollingRef = useRef(false);
+  const safeScrollToBottom = useCallback((animated = false) => {
+    if (scrollingRef.current) return;
+    scrollingRef.current = true;
+    requestAnimationFrame(() => {
+      // RN FlatList
+      // @ts-ignore
+      flatRef.current?.scrollToEnd?.({ animated });
+      scrollingRef.current = false;
+    });
+  }, []);
+
+  // ✅ 프로필 모달
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      setMyId(await getMyId());
-    })();
-  }, []);
+  useEffect(() => setMounted(true), []);
 
   const redirectOnce = useCallback(
     (to: Href) => {
@@ -188,127 +200,103 @@ export default function ChatRoomScreen() {
     [router, navReady]
   );
 
-  // ✅ 초기 로딩
   useEffect(() => {
-    if (!navReady || !isValidRoom) return;
+    (async () => setMyId(await getMyId()))();
+  }, []);
 
-    let cancelled = false;
-
-    const load = async () => {
+  // ✅ 초기 데이터 로딩
+  const initialLoad = useCallback(async () => {
+    try {
       try {
-        try {
-          await getChatRoomList();
-        } catch (e: any) {
-          if (e?.status === 401) {
-            redirectOnce("/login" as Href);
-            return;
-          }
-        }
-
-        const data = await getChatMessages(roomId);
-        if (cancelled) return;
-
-        const normalized = data.map(normalizeRestMessage);
-        const sorted = [...normalized].sort(
-          (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
-        );
-
-        useChatStore.getState().setMessages(roomId, sorted);
-
-        if (sorted.length > 0) {
-          const last = sorted[sorted.length - 1];
-          useChatListStore
-            .getState()
-            .updateRoomLastMessage(roomId, last.content, last.createdAt, true);
-        }
-
-        scrollToBottomUtil(flatRef);
+        await getChatRoomList();
       } catch (e: any) {
-        if (e?.status === 401) {
-          redirectOnce("/login" as Href);
-          return;
-        }
-        Alert.alert("오류", e?.message || "불러오기 실패");
-      } finally {
-        if (!cancelled) {
-          setInitialLoading(false);
-        }
+        if (e?.status === 401) return redirectOnce("/login" as Href);
       }
-    };
 
-    load();
-    useChatListStore.getState().resetUnreadCount(roomId);
+      const data = await getChatMessages(roomId);
+      const sorted = data
+        .map(normalizeRestMessage)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 
-    return () => {
-      cancelled = true;
-    };
-  }, [navReady, isValidRoom, roomId, redirectOnce]);
+      setMessages(roomId, sorted);
 
-  // ✅ 소켓 구독 - 연결 상태 확인 추가!
-  useEffect(() => {
-    // 소켓이 연결되지 않았으면 구독하지 않음
-    if (!subscribeRoom || !isValidRoom || !isSocketConnected) {
-      return;
+      if (sorted.length > 0) {
+        const last = sorted[sorted.length - 1];
+        updateRoomLastMessage(roomId, last.content, last.createdAt, true);
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return redirectOnce("/login" as Href);
+      Alert.alert("오류", e?.message || "불러오기 실패");
+    } finally {
+      setInitialLoading(false);
     }
+  }, [roomId, redirectOnce, setMessages, updateRoomLastMessage]);
+
+  const syncMessages = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const data = await getChatMessages(roomId);
+      const sorted = data
+        .map(normalizeRestMessage)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+
+      setMessages(roomId, sorted);
+
+      if (sorted.length > 0) {
+        const last = sorted[sorted.length - 1];
+        updateRoomLastMessage(roomId, last.content, last.createdAt, true);
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return redirectOnce("/login" as Href);
+    } finally {
+      setSyncing(false);
+    }
+  }, [roomId, redirectOnce, setMessages, updateRoomLastMessage]);
+
+  useEffect(() => {
+    if (!navReady) return;
+    initialLoad();
+    resetUnreadCount(roomId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navReady, roomId]);
+
+  // ✅ 메시지 길이가 증가했을 때만 스크롤 (onContentSizeChange 제거)
+  useEffect(() => {
+    if (!mounted) return;
+    if (messages.length > prevLenRef.current) {
+      safeScrollToBottom(false);
+    }
+    prevLenRef.current = messages.length;
+  }, [messages.length, mounted, safeScrollToBottom]);
+
+  if (!navReady) return null;
+  if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
+
+  // ✅ 소켓 구독 (의존성 roomId만)
+  useEffect(() => {
+    if (!subscribeRoom) return;
+
+    const addMsg = useChatStore.getState().addMessage;
+    const updateLast = useChatListStore.getState().updateRoomLastMessage;
 
     console.log(`📡 [ChatRoom] 소켓 구독 시작: roomId=${roomId}`);
 
     const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
-      console.log("📩 WS 메시지 수신:", m);
-
       const normalized = normalizeRestMessage(m);
-      useChatStore.getState().addMessage(roomId, normalized);
-      scrollToBottomUtil(flatRef);
-
-      useChatListStore
-        .getState()
-        .updateRoomLastMessage(
-          roomId,
-          normalized.content,
-          normalized.createdAt,
-          true
-        );
+      addMsg(roomId, normalized);
+      updateLast(roomId, normalized.content, normalized.createdAt, true);
+      // 스크롤은 messages.length effect에서 처리 (여기서 직접 호출 X)
     });
 
     return () => {
       console.log(`📡 [ChatRoom] 소켓 구독 해제: roomId=${roomId}`);
       unsub?.();
     };
-  }, [roomId, isValidRoom, isSocketConnected]); // ✅ isSocketConnected 의존성 추가
-
-  const syncMessages = useCallback(async () => {
-    if (!isValidRoom) return;
-
-    setSyncing(true);
-    try {
-      const data = await getChatMessages(roomId);
-      const normalized = data.map(normalizeRestMessage);
-      const sorted = [...normalized].sort(
-        (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
-      );
-
-      useChatStore.getState().setMessages(roomId, sorted);
-
-      if (sorted.length > 0) {
-        const last = sorted[sorted.length - 1];
-        useChatListStore
-          .getState()
-          .updateRoomLastMessage(roomId, last.content, last.createdAt, true);
-      }
-
-      scrollToBottomUtil(flatRef);
-    } catch (e: any) {
-      if (e?.status === 401) {
-        redirectOnce("/login" as Href);
-      }
-    } finally {
-      setSyncing(false);
-    }
-  }, [roomId, isValidRoom, redirectOnce]);
+  }, [roomId]);
 
   const onSend = useCallback(async () => {
     const t = text.trim();
-    if (!t || !myId || !isValidRoom) return;
+    if (!t || !myId) return;
 
     const nowIso = new Date().toISOString();
     const optimistic: ChatMessageResponse = {
@@ -322,11 +310,10 @@ export default function ChatRoomScreen() {
       type: "TEXT",
     };
 
-    useChatStore.getState().addMessage(roomId, optimistic);
-    useChatListStore.getState().updateRoomLastMessage(roomId, t, nowIso, true);
+    addMessage(roomId, optimistic);
+    updateRoomLastMessage(roomId, t, nowIso, true);
     setText("");
-
-    scrollToBottomUtil(flatRef);
+    safeScrollToBottom(false);
 
     try {
       if (sendChatMessageRaw) {
@@ -338,7 +325,15 @@ export default function ChatRoomScreen() {
     } finally {
       inputRef.current?.focus();
     }
-  }, [text, myId, roomId, isValidRoom, syncMessages]);
+  }, [
+    text,
+    myId,
+    roomId,
+    syncMessages,
+    addMessage,
+    updateRoomLastMessage,
+    safeScrollToBottom,
+  ]);
 
   const handlePressAvatar = useCallback(
     async (senderId: number) => {
@@ -346,6 +341,7 @@ export default function ChatRoomScreen() {
 
       setProfileLoading(true);
       setProfileModalVisible(true);
+
       try {
         const data = await fetchFriendProfile(senderId);
         setSelectedProfile(data);
@@ -363,6 +359,8 @@ export default function ChatRoomScreen() {
   const renderItem = useCallback(
     ({ item, index }: { item: ChatMessageResponse; index: number }) => {
       const mine = myId != null && item.senderId === myId;
+
+      // (기존 로직 유지) 필요하면 날짜 separator를 "날짜 바뀔 때"로 개선 가능
       const showDateSeparator = index === 0;
       const showTimeLabel = index === 0;
 
@@ -448,10 +446,6 @@ export default function ChatRoomScreen() {
     [myId, mounted, handlePressAvatar]
   );
 
-  // ✅ 조건부 return은 모든 Hook 선언 후에!
-  if (!navReady) return null;
-  if (!isValidRoom) return <Redirect href={"/chatlist" as Href} />;
-
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: "#fafafa" }}
@@ -466,6 +460,7 @@ export default function ChatRoomScreen() {
           <Ionicons name="chevron-back" size={22} color="#111" />
         </Pressable>
         <Text style={chatRoomStyles.headerTitle}>{headerTitle}</Text>
+
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <Pressable style={chatRoomStyles.headerBtn}>
             <Ionicons name="search" size={20} color="#111" />
@@ -489,11 +484,13 @@ export default function ChatRoomScreen() {
         </View>
       ) : (
         <FlatList
+          // @ts-ignore
           ref={flatRef}
           data={messages}
           keyExtractor={(m) => String(m.messageId)}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
+          // ❌ onContentSizeChange 제거 (scroll 루프 방지)
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
           extraData={mounted}
         />
@@ -506,6 +503,7 @@ export default function ChatRoomScreen() {
         <Pressable style={chatRoomStyles.circleBtn}>
           <Ionicons name="happy-outline" size={20} color="#444" />
         </Pressable>
+
         <View style={chatRoomStyles.inputWrap}>
           <TextInput
             ref={inputRef}
@@ -547,9 +545,7 @@ export default function ChatRoomScreen() {
                       <View style={chatRoomModalStyles.bgContainer}>
                         {selectedProfile.backgroundPhotoUrl ? (
                           <Image
-                            source={{
-                              uri: selectedProfile.backgroundPhotoUrl,
-                            }}
+                            source={{ uri: selectedProfile.backgroundPhotoUrl }}
                             style={chatRoomModalStyles.bgImage}
                           />
                         ) : (
@@ -560,6 +556,7 @@ export default function ChatRoomScreen() {
                             ]}
                           />
                         )}
+
                         <Pressable
                           style={chatRoomModalStyles.closeBtn}
                           onPress={() => setProfileModalVisible(false)}
@@ -590,11 +587,13 @@ export default function ChatRoomScreen() {
                             </View>
                           )}
                         </View>
+
                         <Text style={chatRoomModalStyles.name}>
                           {selectedProfile.nickname ||
                             selectedProfile.name ||
                             "이름 없음"}
                         </Text>
+
                         <Text style={chatRoomModalStyles.status}>
                           {selectedProfile.statusMessage || ""}
                         </Text>
