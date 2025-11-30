@@ -8,7 +8,6 @@ import {
   Keyboard,
   Platform,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -16,6 +15,7 @@ import {
   Image,
   TouchableWithoutFeedback,
 } from "react-native";
+
 import {
   Redirect,
   type Href,
@@ -24,6 +24,12 @@ import {
   useRootNavigationState,
 } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+
+// ✅ 스타일 모듈 (named exports)
+import {
+  chatRoomStyles,
+  chatRoomModalStyles,
+} from "../../src/styles/chat/ChatRoom.module";
 
 // ✅ Zustand Store
 import { useChatStore } from "../../src/store/chatStore";
@@ -149,6 +155,13 @@ async function sendCompat(roomId: number, myId: number, content: string) {
   return sendChatMessageRaw(roomId, myId, content);
 }
 
+// ✅ 스크롤 헬퍼 함수 (유틸로 분리) - flatRef 타입 any로 수정
+function scrollToBottomUtil(flatRef: React.RefObject<any>) {
+  requestAnimationFrame(() => {
+    flatRef.current?.scrollToEnd({ animated: true });
+  });
+}
+
 export default function ChatRoomScreen() {
   const { id, title } = useLocalSearchParams<{ id?: string; title?: string }>();
   const roomId = Number(id);
@@ -178,7 +191,8 @@ export default function ChatRoomScreen() {
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
 
-  const flatRef = useRef<FlatList<ChatMessageResponse>>(null);
+  // ✅ flatRef 타입을 any로 수정
+  const flatRef = useRef<any>(null);
   const lastRedirectRef = useRef<Href | null>(null);
 
   // 프로필 모달
@@ -200,12 +214,6 @@ export default function ChatRoomScreen() {
     },
     [router, navReady]
   );
-
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      flatRef.current?.scrollToEnd({ animated: true });
-    });
-  }, []);
 
   useEffect(() => {
     (async () => {
@@ -236,20 +244,14 @@ export default function ChatRoomScreen() {
         updateRoomLastMessage(roomId, last.content, last.createdAt, true);
       }
 
-      scrollToBottom();
+      scrollToBottomUtil(flatRef);
     } catch (e: any) {
       if (e?.status === 401) return redirectOnce("/login" as Href);
       Alert.alert("오류", e?.message || "불러오기 실패");
     } finally {
       setInitialLoading(false);
     }
-  }, [
-    roomId,
-    redirectOnce,
-    scrollToBottom,
-    setMessages,
-    updateRoomLastMessage,
-  ]);
+  }, [roomId, redirectOnce, setMessages, updateRoomLastMessage]);
 
   const syncMessages = useCallback(async () => {
     setSyncing(true);
@@ -267,19 +269,13 @@ export default function ChatRoomScreen() {
         updateRoomLastMessage(roomId, last.content, last.createdAt, true);
       }
 
-      scrollToBottom();
+      scrollToBottomUtil(flatRef);
     } catch (e: any) {
       if (e?.status === 401) return redirectOnce("/login" as Href);
     } finally {
       setSyncing(false);
     }
-  }, [
-    roomId,
-    scrollToBottom,
-    redirectOnce,
-    setMessages,
-    updateRoomLastMessage,
-  ]);
+  }, [roomId, redirectOnce, setMessages, updateRoomLastMessage]);
 
   useEffect(() => {
     if (!navReady) return;
@@ -290,7 +286,7 @@ export default function ChatRoomScreen() {
   if (!navReady) return null;
   if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
 
-  // 🔥 소켓 구독 (무한 루프 방지 버전)
+  // 🔥 소켓 구독 (무한 루프 방지 버전 + scrollToBottom 의존성 제거)
   useEffect(() => {
     if (!subscribeRoom) return;
 
@@ -303,7 +299,9 @@ export default function ChatRoomScreen() {
 
       const normalized = normalizeRestMessage(m);
       addMsg(roomId, normalized);
-      scrollToBottom();
+
+      // ✅ 직접 스크롤 (scrollToBottom 의존성 제거)
+      scrollToBottomUtil(flatRef);
 
       updateLast(
         roomId,
@@ -316,8 +314,9 @@ export default function ChatRoomScreen() {
     return () => {
       unsub?.();
     };
-  }, [roomId, scrollToBottom]);
+  }, [roomId]); // ✅ scrollToBottom 제거!
 
+  // ✅ onSend에서도 scrollToBottom 의존성 제거
   const onSend = useCallback(async () => {
     const t = text.trim();
     if (!t || !myId) return;
@@ -337,7 +336,9 @@ export default function ChatRoomScreen() {
     addMessage(roomId, optimistic);
     updateRoomLastMessage(roomId, t, nowIso, true);
     setText("");
-    scrollToBottom();
+
+    // ✅ 직접 스크롤
+    scrollToBottomUtil(flatRef);
 
     try {
       if (sendChatMessageRaw) {
@@ -347,15 +348,7 @@ export default function ChatRoomScreen() {
     } catch {
       Alert.alert("전송 실패", "메시지를 보낼 수 없어요.");
     }
-  }, [
-    text,
-    myId,
-    roomId,
-    scrollToBottom,
-    syncMessages,
-    addMessage,
-    updateRoomLastMessage,
-  ]);
+  }, [text, myId, roomId, syncMessages, addMessage, updateRoomLastMessage]); // ✅ scrollToBottom 제거!
 
   // 프로필 클릭
   const handlePressAvatar = async (senderId: number) => {
@@ -415,53 +408,71 @@ export default function ChatRoomScreen() {
       return (
         <View>
           {showDateSeparator && mounted && (
-            <View style={styles.dateSeparator}>
-              <Text style={styles.dateSeparatorText}>{dateText}</Text>
+            <View style={chatRoomStyles.dateSeparator}>
+              <Text style={chatRoomStyles.dateSeparatorText}>{dateText}</Text>
             </View>
           )}
 
           <View
             style={[
-              styles.msgRow,
-              mine ? styles.msgRowMine : styles.msgRowOther,
+              chatRoomStyles.msgRow,
+              mine ? chatRoomStyles.msgRowMine : chatRoomStyles.msgRowOther,
             ]}
           >
             {!mine && (
               <Pressable
-                style={styles.avatarContainer}
+                style={chatRoomStyles.avatarContainer}
                 onPress={() => handlePressAvatar(item.senderId)}
               >
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarInitial}>
+                <View style={chatRoomStyles.avatarPlaceholder}>
+                  <Text style={chatRoomStyles.avatarInitial}>
                     {item.senderName?.charAt(0) ?? "?"}
                   </Text>
                 </View>
               </Pressable>
             )}
 
-            <View style={styles.bubbleLine}>
+            <View style={chatRoomStyles.bubbleLine}>
               {mine && showTimeLabel && mounted && (
-                <Text style={[styles.timeBeside, styles.timeBesideMine]}>
+                <Text
+                  style={[
+                    chatRoomStyles.timeBeside,
+                    chatRoomStyles.timeBesideMine,
+                  ]}
+                >
                   {timeLabel}
                 </Text>
               )}
 
               <View
                 style={[
-                  styles.bubble,
-                  mine ? styles.bubbleMine : styles.bubbleOther,
+                  chatRoomStyles.bubble,
+                  mine ? chatRoomStyles.bubbleMine : chatRoomStyles.bubbleOther,
                 ]}
               >
                 {!mine && item.senderName ? (
-                  <Text style={styles.senderName}>{item.senderName}</Text>
+                  <Text style={chatRoomStyles.senderName}>
+                    {item.senderName}
+                  </Text>
                 ) : null}
-                <Text style={mine ? styles.msgTextMine : styles.msgTextOther}>
+                <Text
+                  style={
+                    mine
+                      ? chatRoomStyles.msgTextMine
+                      : chatRoomStyles.msgTextOther
+                  }
+                >
                   {item.content}
                 </Text>
               </View>
 
               {!mine && showTimeLabel && mounted && (
-                <Text style={[styles.timeBeside, styles.timeBesideOther]}>
+                <Text
+                  style={[
+                    chatRoomStyles.timeBeside,
+                    chatRoomStyles.timeBesideOther,
+                  ]}
+                >
                   {timeLabel}
                 </Text>
               )}
@@ -480,16 +491,19 @@ export default function ChatRoomScreen() {
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
     >
       {/* 헤더 */}
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.headerBtn}>
+      <View style={chatRoomStyles.header}>
+        <Pressable
+          onPress={() => router.back()}
+          style={chatRoomStyles.headerBtn}
+        >
           <Ionicons name="chevron-back" size={22} color="#111" />
         </Pressable>
-        <Text style={styles.headerTitle}>{headerTitle}</Text>
+        <Text style={chatRoomStyles.headerTitle}>{headerTitle}</Text>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Pressable style={styles.headerBtn}>
+          <Pressable style={chatRoomStyles.headerBtn}>
             <Ionicons name="search" size={20} color="#111" />
           </Pressable>
-          <Pressable style={styles.headerBtn}>
+          <Pressable style={chatRoomStyles.headerBtn}>
             <Ionicons
               name="settings-outline"
               size={20}
@@ -514,31 +528,31 @@ export default function ChatRoomScreen() {
           keyExtractor={(m) => String(m.messageId)}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
-          onContentSizeChange={scrollToBottom}
+          onContentSizeChange={() => scrollToBottomUtil(flatRef)}
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
         />
       )}
 
       {/* 입력창 */}
-      <View style={styles.inputBar}>
-        <Pressable style={styles.circleBtn}>
+      <View style={chatRoomStyles.inputBar}>
+        <Pressable style={chatRoomStyles.circleBtn}>
           <Ionicons name="add" size={20} color="#444" />
         </Pressable>
-        <Pressable style={styles.circleBtn}>
+        <Pressable style={chatRoomStyles.circleBtn}>
           <Ionicons name="happy-outline" size={20} color="#444" />
         </Pressable>
-        <View style={styles.inputWrap}>
+        <View style={chatRoomStyles.inputWrap}>
           <TextInput
             placeholder="메세지 입력"
             value={text}
             onChangeText={setText}
-            style={styles.input}
+            style={chatRoomStyles.input}
             onSubmitEditing={onSend}
             returnKeyType="send"
           />
           <Pressable
             style={[
-              styles.sendFab,
+              chatRoomStyles.sendFab,
               !text.trim() && { backgroundColor: "#D8D8E8" },
             ]}
             onPress={onSend}
@@ -557,47 +571,49 @@ export default function ChatRoomScreen() {
         onRequestClose={() => setProfileModalVisible(false)}
       >
         <TouchableWithoutFeedback onPress={() => setProfileModalVisible(false)}>
-          <View style={modalStyles.overlay}>
+          <View style={chatRoomModalStyles.overlay}>
             <TouchableWithoutFeedback>
-              <View style={modalStyles.card}>
+              <View style={chatRoomModalStyles.card}>
                 {profileLoading ? (
                   <ActivityIndicator size="large" color="#7C73FF" />
                 ) : (
                   selectedProfile && (
                     <>
-                      <View style={modalStyles.bgContainer}>
+                      <View style={chatRoomModalStyles.bgContainer}>
                         {selectedProfile.backgroundPhotoUrl ? (
                           <Image
-                            source={{ uri: selectedProfile.backgroundPhotoUrl }}
-                            style={modalStyles.bgImage}
+                            source={{
+                              uri: selectedProfile.backgroundPhotoUrl,
+                            }}
+                            style={chatRoomModalStyles.bgImage}
                           />
                         ) : (
                           <View
                             style={[
-                              modalStyles.bgImage,
+                              chatRoomModalStyles.bgImage,
                               { backgroundColor: "#eee" },
                             ]}
                           />
                         )}
                         <Pressable
-                          style={modalStyles.closeBtn}
+                          style={chatRoomModalStyles.closeBtn}
                           onPress={() => setProfileModalVisible(false)}
                         >
                           <Ionicons name="close" size={20} color="#333" />
                         </Pressable>
                       </View>
 
-                      <View style={modalStyles.infoContainer}>
-                        <View style={modalStyles.avatarContainer}>
+                      <View style={chatRoomModalStyles.infoContainer}>
+                        <View style={chatRoomModalStyles.avatarContainer}>
                           {selectedProfile.profilePhotoUrl ? (
                             <Image
                               source={{ uri: selectedProfile.profilePhotoUrl }}
-                              style={modalStyles.avatar}
+                              style={chatRoomModalStyles.avatar}
                             />
                           ) : (
                             <View
                               style={[
-                                modalStyles.avatar,
+                                chatRoomModalStyles.avatar,
                                 {
                                   backgroundColor: "#ccc",
                                   justifyContent: "center",
@@ -609,20 +625,22 @@ export default function ChatRoomScreen() {
                             </View>
                           )}
                         </View>
-                        <Text style={modalStyles.name}>
+                        <Text style={chatRoomModalStyles.name}>
                           {selectedProfile.nickname ||
                             selectedProfile.name ||
                             "이름 없음"}
                         </Text>
-                        <Text style={modalStyles.status}>
+                        <Text style={chatRoomModalStyles.status}>
                           {selectedProfile.statusMessage || ""}
                         </Text>
                       </View>
 
-                      <View style={modalStyles.actionRow}>
-                        <View style={modalStyles.actionItem}>
+                      <View style={chatRoomModalStyles.actionRow}>
+                        <View style={chatRoomModalStyles.actionItem}>
                           <Ionicons name="chatbubble" size={20} color="#fff" />
-                          <Text style={modalStyles.actionText}>1:1 채팅</Text>
+                          <Text style={chatRoomModalStyles.actionText}>
+                            1:1 채팅
+                          </Text>
                         </View>
                       </View>
                     </>
@@ -636,183 +654,3 @@ export default function ChatRoomScreen() {
     </KeyboardAvoidingView>
   );
 }
-
-const PURPLE = "#9997FF";
-
-const styles = StyleSheet.create({
-  header: {
-    height: 56,
-    paddingHorizontal: 12,
-    backgroundColor: "#fff",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 2,
-    borderBottomColor: PURPLE,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  headerBtn: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
-
-  dateSeparator: { alignItems: "center", marginVertical: 16 },
-  dateSeparatorText: {
-    fontSize: 11,
-    color: "#555",
-    backgroundColor: "rgba(0,0,0,0.06)",
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    overflow: "hidden",
-  },
-
-  msgRow: { flexDirection: "row", marginVertical: 6, paddingHorizontal: 6 },
-  msgRowMine: { justifyContent: "flex-end" },
-  msgRowOther: { justifyContent: "flex-start" },
-
-  avatarContainer: { marginRight: 8, alignSelf: "flex-start" },
-  avatarPlaceholder: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#EFEFEF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarInitial: { fontSize: 14, color: "#666", fontWeight: "600" },
-
-  bubbleLine: { flexDirection: "row", alignItems: "flex-end", maxWidth: "88%" },
-  bubble: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    maxWidth: "100%",
-  },
-  bubbleMine: { backgroundColor: PURPLE, borderBottomRightRadius: 6 },
-  bubbleOther: { backgroundColor: "#EFEFEF", borderBottomLeftRadius: 6 },
-  senderName: { fontSize: 12, color: "#666", marginBottom: 4 },
-  msgTextMine: { color: "#fff", fontSize: 15, lineHeight: 21 },
-  msgTextOther: { color: "#111", fontSize: 15, lineHeight: 21 },
-
-  timeBeside: { fontSize: 11, color: "#8E8E8E", alignSelf: "flex-end" },
-  timeBesideMine: { textAlign: "left", marginRight: 4, marginLeft: 0 },
-  timeBesideOther: { textAlign: "right", marginLeft: 4, marginRight: 0 },
-
-  inputBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: "#fff",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#E9E9EC",
-  },
-  circleBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F2F2F5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  inputWrap: {
-    flex: 1,
-    position: "relative",
-    backgroundColor: "#F3F3F7",
-    borderRadius: 22,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  input: {
-    paddingLeft: 14,
-    paddingRight: 54,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#111",
-    maxHeight: 120,
-  },
-  sendFab: {
-    position: "absolute",
-    right: 6,
-    top: "50%",
-    transform: [{ translateY: -16 }],
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: PURPLE,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
-
-// 모달 스타일
-const modalStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  card: {
-    width: 300,
-    height: 420,
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    overflow: "hidden",
-  },
-  bgContainer: { height: 120, width: "100%", position: "relative" },
-  bgImage: { width: "100%", height: "100%" },
-  closeBtn: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    backgroundColor: "rgba(255,255,255,0.7)",
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  infoContainer: { flex: 1, alignItems: "center", marginTop: -40 },
-  avatarContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    padding: 3,
-    backgroundColor: "#fff",
-    marginBottom: 10,
-    elevation: 2,
-  },
-  avatar: { width: "100%", height: "100%", borderRadius: 40 },
-  name: { fontSize: 18, fontWeight: "700", color: "#111", marginBottom: 4 },
-  status: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    paddingHorizontal: 20,
-  },
-  actionRow: {
-    height: 60,
-    borderTopWidth: 1,
-    borderTopColor: "#eee",
-    flexDirection: "row",
-  },
-  actionItem: {
-    flex: 1,
-    backgroundColor: PURPLE,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  actionText: { color: "#fff", fontWeight: "600", fontSize: 15 },
-});
