@@ -1,6 +1,5 @@
-// src/components/chat/MessageInput.tsx
 import React from "react";
-import { Pressable, TextInput, View } from "react-native";
+import { Pressable, TextInput, View, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { chatRoomStyles } from "../../styles/chat/ChatRoom.module";
 
@@ -8,7 +7,7 @@ type Props = {
   text: string;
   setText: (v: string) => void;
   onSend: () => void;
-  inputRef: React.RefObject<TextInput | null>; // ✅ 여기!
+  inputRef: React.RefObject<TextInput>;
   onHeight?: (h: number) => void;
 };
 
@@ -37,10 +36,19 @@ export default function MessageInput({
           placeholder="메세지 입력"
           value={text}
           onChangeText={setText}
-          style={chatRoomStyles.input}
           onSubmitEditing={onSend}
           returnKeyType="send"
+          underlineColorAndroid="transparent"
+          style={[
+            chatRoomStyles.input,
+            Platform.OS === "web" &&
+              ({
+                outlineStyle: "none",
+                boxShadow: "none",
+              } as any),
+          ]}
         />
+
         <Pressable
           style={[
             chatRoomStyles.sendFab,
