@@ -1,11 +1,5 @@
 // app/chat/[id].tsx
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -96,12 +90,14 @@ function formatDateSafe(isoString: string): string {
   }
 }
 
+// ✅ 오전/오후 표시 + 12시간제
 function formatTimeSafe(isoString: string): string {
   if (typeof window === "undefined") return "";
   try {
-    return new Date(isoString).toLocaleTimeString([], {
-      hour: "2-digit",
+    return new Date(isoString).toLocaleTimeString("ko-KR", {
+      hour: "numeric",
       minute: "2-digit",
+      hour12: true,
     });
   } catch {
     return "";
@@ -114,6 +110,36 @@ function normalizeRestMessage(m: ChatMessageResponse): ChatMessageResponse {
     createdAt: toIsoSafe((m as any).createdAt),
     sentAt: toIsoSafe((m as any).sentAt ?? (m as any).createdAt),
   };
+}
+
+function isSameDay(aIso: string, bIso: string) {
+  try {
+    const a = new Date(aIso);
+    const b = new Date(bIso);
+    return (
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isSameMinute(aIso: string, bIso: string) {
+  try {
+    const a = new Date(aIso);
+    const b = new Date(bIso);
+    return (
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate() &&
+      a.getHours() === b.getHours() &&
+      a.getMinutes() === b.getMinutes()
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function getMyId(): Promise<number | null> {
@@ -152,7 +178,6 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ✅ 방별 메시지 사용 (빈 배열은 고정 상수로)
   const messages = useChatStore((s) => s.messagesByRoom[roomId] ?? EMPTY);
   const setMessages = useChatStore((s) => s.setMessages);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -176,7 +201,6 @@ export default function ChatRoomScreen() {
     if (scrollingRef.current) return;
     scrollingRef.current = true;
     requestAnimationFrame(() => {
-      // RN FlatList
       // @ts-ignore
       flatRef.current?.scrollToEnd?.({ animated });
       scrollingRef.current = false;
@@ -200,11 +224,17 @@ export default function ChatRoomScreen() {
     [router, navReady]
   );
 
+  // ✅ 뒤로가기: back 가능하면 back / 아니면 chatlist
+  const handleBack = useCallback(() => {
+    // @ts-ignore
+    if (router.canGoBack?.()) router.back();
+    else router.replace("/chatlist" as Href);
+  }, [router]);
+
   useEffect(() => {
     (async () => setMyId(await getMyId()))();
   }, []);
 
-  // ✅ 초기 데이터 로딩
   const initialLoad = useCallback(async () => {
     try {
       try {
@@ -260,19 +290,17 @@ export default function ChatRoomScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navReady, roomId]);
 
-  // ✅ 메시지 길이가 증가했을 때만 스크롤 (onContentSizeChange 제거)
+  // ✅ 메시지 길이가 증가했을 때만 스크롤
   useEffect(() => {
     if (!mounted) return;
-    if (messages.length > prevLenRef.current) {
-      safeScrollToBottom(false);
-    }
+    if (messages.length > prevLenRef.current) safeScrollToBottom(false);
     prevLenRef.current = messages.length;
   }, [messages.length, mounted, safeScrollToBottom]);
 
   if (!navReady) return null;
   if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
 
-  // ✅ 소켓 구독 (의존성 roomId만)
+  // ✅ 소켓 구독
   useEffect(() => {
     if (!subscribeRoom) return;
 
@@ -285,7 +313,6 @@ export default function ChatRoomScreen() {
       const normalized = normalizeRestMessage(m);
       addMsg(roomId, normalized);
       updateLast(roomId, normalized.content, normalized.createdAt, true);
-      // 스크롤은 messages.length effect에서 처리 (여기서 직접 호출 X)
     });
 
     return () => {
@@ -316,9 +343,7 @@ export default function ChatRoomScreen() {
     safeScrollToBottom(false);
 
     try {
-      if (sendChatMessageRaw) {
-        await sendCompat(roomId, myId, t);
-      }
+      if (sendChatMessageRaw) await sendCompat(roomId, myId, t);
       await syncMessages();
     } catch {
       Alert.alert("전송 실패", "메시지를 보낼 수 없어요.");
@@ -360,9 +385,19 @@ export default function ChatRoomScreen() {
     ({ item, index }: { item: ChatMessageResponse; index: number }) => {
       const mine = myId != null && item.senderId === myId;
 
-      // (기존 로직 유지) 필요하면 날짜 separator를 "날짜 바뀔 때"로 개선 가능
-      const showDateSeparator = index === 0;
-      const showTimeLabel = index === 0;
+      // ✅ 날짜는 "바뀔 때만"
+      const prev = index > 0 ? messages[index - 1] : null;
+      const showDateSeparator =
+        !prev || !isSameDay(prev.createdAt, item.createdAt);
+
+      // ✅ 시간은 "연속 묶음의 마지막 말풍선에만"
+      const next = index < messages.length - 1 ? messages[index + 1] : null;
+      const isLastInGroup =
+        !next ||
+        next.senderId !== item.senderId ||
+        !isSameMinute(item.createdAt, next.createdAt);
+
+      const showTimeLabel = isLastInGroup;
 
       const dateText = mounted ? formatDateSafe(item.createdAt) : "";
       const timeLabel = mounted ? formatTimeSafe(item.createdAt) : "";
@@ -395,6 +430,7 @@ export default function ChatRoomScreen() {
             )}
 
             <View style={chatRoomStyles.bubbleLine}>
+              {/* ✅ 내 말풍선: 시간은 말풍선 "왼쪽 아래", 마지막일 때만 */}
               {mine && showTimeLabel && mounted && (
                 <Text
                   style={[
@@ -417,6 +453,7 @@ export default function ChatRoomScreen() {
                     {item.senderName}
                   </Text>
                 ) : null}
+
                 <Text
                   style={
                     mine
@@ -428,6 +465,7 @@ export default function ChatRoomScreen() {
                 </Text>
               </View>
 
+              {/* ✅ 상대 말풍선: 시간은 말풍선 "오른쪽 아래", 마지막일 때만 */}
               {!mine && showTimeLabel && mounted && (
                 <Text
                   style={[
@@ -443,7 +481,7 @@ export default function ChatRoomScreen() {
         </View>
       );
     },
-    [myId, mounted, handlePressAvatar]
+    [myId, mounted, handlePressAvatar, messages]
   );
 
   return (
@@ -453,12 +491,10 @@ export default function ChatRoomScreen() {
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
     >
       <View style={chatRoomStyles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          style={chatRoomStyles.headerBtn}
-        >
+        <Pressable onPress={handleBack} style={chatRoomStyles.headerBtn}>
           <Ionicons name="chevron-back" size={22} color="#111" />
         </Pressable>
+
         <Text style={chatRoomStyles.headerTitle}>{headerTitle}</Text>
 
         <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -490,7 +526,6 @@ export default function ChatRoomScreen() {
           keyExtractor={(m) => String(m.messageId)}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
-          // ❌ onContentSizeChange 제거 (scroll 루프 방지)
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
           extraData={mounted}
         />
