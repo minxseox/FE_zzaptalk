@@ -3,8 +3,9 @@ import React from "react";
 import { View, Text, TouchableOpacity, Alert, StyleSheet } from "react-native";
 import { router } from "expo-router";
 
-// (선택 사항) 토큰 삭제를 위해 AsyncStorage 등을 사용한다면 import 하세요
-// import AsyncStorage from '@react-native-async-storage/async-storage';
+// ✅ 로그아웃 API & 토큰 삭제 유틸 불러오기
+import { logout } from "../../../src/services/auth";
+import { clearAuthTokens } from "../../../src/lib/authStorage";
 
 export default function SettingsScreen() {
   const handleLogout = () => {
@@ -15,14 +16,16 @@ export default function SettingsScreen() {
         style: "destructive", // 아이폰에서 빨간색으로 표시됨
         onPress: async () => {
           try {
-            // 1. 토큰 삭제 로직 (필요시 주석 해제하여 사용)
-            // await AsyncStorage.removeItem('accessToken');
-            // await AsyncStorage.removeItem('refreshToken');
+            // 1. 서버에 로그아웃 요청
+            await logout();
+
+            // 2. 로컬에 저장된 토큰 삭제
+            await clearAuthTokens();
 
             console.log("로그아웃 되었습니다.");
 
-            // 2. 로그인 화면으로 이동 (뒤로가기 방지 위해 replace 사용)
-            // 경로는 프로젝트 설정에 맞춰 수정하세요 (보통 '/' 또는 '/login')
+            // 3. 로그인/시작 화면으로 이동 (뒤로가기 방지 위해 replace 사용)
+            // 경로는 프로젝트 구조에 맞게 수정 (예: "/login" 등)
             router.replace("/");
           } catch (e) {
             console.error("로그아웃 실패", e);

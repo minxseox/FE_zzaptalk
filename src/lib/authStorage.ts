@@ -52,3 +52,11 @@ export async function clearTokenAll() {
   await delItem(TOKEN_KEY);
   await delItem(EXPIRES_KEY);
 }
+
+/**
+ * 👇 Settings 화면 등에서 쓰기 좋은 alias
+ *  - import { clearAuthTokens } from "../lib/authStorage";
+ */
+export async function clearAuthTokens() {
+  await clearTokenAll();
+}

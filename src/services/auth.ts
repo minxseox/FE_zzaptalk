@@ -121,3 +121,63 @@ export async function login(payload: LoginPayload): Promise<string> {
 
   return finalToken;
 }
+
+/* =========================
+ * Access Token 재발급
+ * POST /api/v1/users/refresh
+ *  - 인증 필요 X (skipAuth: true)
+ *  - body: { refreshToken }
+ * ========================= */
+export async function refreshAccessToken(
+  refreshToken: string
+): Promise<string> {
+  const body = { refreshToken };
+
+  const res = (await post<AuthLoginResponse>("/v1/users/refresh", body, {
+    skipAuth: true, // 🔥 Authorization 헤더 없이 호출
+  })) as AuthLoginResponse;
+
+  const rawToken =
+    typeof res === "string"
+      ? res
+      : res?.accessToken ??
+        res?.token ??
+        res?.data?.accessToken ??
+        res?.data?.token ??
+        "";
+
+  if (!rawToken) {
+    throw new ApiError("토큰 재발급에 실패했습니다.", 500, res);
+  }
+
+  const finalToken = String(rawToken).trim().replace(/^"|"$/g, "");
+
+  // 새 Access Token 저장 & 설정
+  try {
+    const jwtPayload = parseJwt(finalToken);
+    const expSeconds = jwtPayload?.exp;
+    const expiresAtMs = expSeconds
+      ? expSeconds * 1000
+      : Date.now() + 60 * 60 * 1000;
+
+    setApiAuthToken(finalToken);
+    await saveTokenWithExpiry(finalToken, expiresAtMs);
+  } catch (err) {
+    setApiAuthToken(finalToken);
+    // eslint-disable-next-line no-console
+    console.error("[auth.ts] 토큰 재발급 후 토큰 저장/설정 실패", err);
+  }
+
+  return finalToken;
+}
+
+/* =========================
+ * 로그아웃
+ * POST /api/v1/users/logout
+ *  - 인증 필요 O (기본값: skipAuth:false)
+ * ========================= */
+export async function logout(): Promise<void> {
+  // 서버에서 Access/Refresh 처리(블랙리스트, 쿠키 삭제 등)를 수행
+  // 클라이언트 쪽 토큰 삭제는 호출하는 쪽(Setting 화면)에서 clearAuthTokens로 처리
+  await post("/v1/users/logout", {}); // 옵션 안 주면 기본적으로 인증 붙는 post일 거라 그대로 사용
+}
