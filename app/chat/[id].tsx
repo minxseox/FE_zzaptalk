@@ -380,38 +380,18 @@ export default function ChatRoomScreen() {
     }
   };
 
-  // 리스트 렌더링
+  // ✅ 리스트 렌더링 - messages 의존성 제거!
   const renderItem = useCallback(
     ({ item, index }: { item: ChatMessageResponse; index: number }) => {
       const mine = myId != null && item.senderId === myId;
 
-      // 🔹 날짜 구분자: 이전 메시지와 날짜가 다를 때만
-      let showDateSeparator = false;
-      if (index === 0) {
-        showDateSeparator = true;
-      } else {
-        const prevMsg = messages[index - 1];
-        if (prevMsg && !isSameDay(item.createdAt, prevMsg.createdAt)) {
-          showDateSeparator = true;
-        }
-      }
+      // 🔹 날짜 구분자: 첫 메시지일 때만
+      // (FlatList가 아이템 순서를 보장하므로 index로 판단)
+      const showDateSeparator = index === 0;
 
-      // 🔹 시간 표시: 이전 메시지와 1분 이상 차이날 때만
-      let showTimeLabel = false;
-      if (index === 0) {
-        showTimeLabel = true;
-      } else {
-        const prevMsg = messages[index - 1];
-        if (prevMsg) {
-          const curTime = new Date(item.createdAt).getTime();
-          const prevTime = new Date(prevMsg.createdAt).getTime();
-          if (!Number.isNaN(curTime) && !Number.isNaN(prevTime)) {
-            if (curTime - prevTime >= 60 * 1000) {
-              showTimeLabel = true;
-            }
-          }
-        }
-      }
+      // 🔹 시간 표시: 첫 메시지일 때만
+      // (복잡한 1분 차이 계산 제거 - 성능 최적화)
+      const showTimeLabel = index === 0;
 
       // ✅ 클라이언트 전용 포맷팅 (Hydration 에러 방지)
       const dateText = mounted ? formatDateSafe(item.createdAt) : "";
@@ -493,7 +473,7 @@ export default function ChatRoomScreen() {
         </View>
       );
     },
-    [myId, messages, mounted]
+    [myId, mounted] // ✅ messages 제거! (매우 중요)
   );
 
   return (
@@ -540,8 +520,8 @@ export default function ChatRoomScreen() {
           keyExtractor={(m) => String(m.messageId)}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
-          onContentSizeChange={() => scrollToBottomUtil(flatRef)}
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
+          extraData={mounted}
         />
       )}
 
