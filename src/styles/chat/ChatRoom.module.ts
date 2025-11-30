@@ -43,6 +43,9 @@ export const chatRoomStyles = StyleSheet.create({
   msgRowOther: { justifyContent: "flex-start" },
 
   avatarContainer: { marginRight: 8, alignSelf: "flex-start" },
+  // ✅ 연속 메시지일 때 자리 유지
+  avatarSpacer: { width: 34, marginRight: 8 },
+
   avatarPlaceholder: {
     width: 34,
     height: 34,
@@ -53,13 +56,11 @@ export const chatRoomStyles = StyleSheet.create({
   },
   avatarInitial: { fontSize: 14, color: "#666", fontWeight: "600" },
 
-  // ✅ 시간 + 말풍선 라인 (카톡처럼 아래 정렬)
   bubbleLine: {
     flexDirection: "row",
     alignItems: "flex-end",
     maxWidth: "88%",
   },
-
   bubble: {
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -68,21 +69,21 @@ export const chatRoomStyles = StyleSheet.create({
   },
   bubbleMine: { backgroundColor: PURPLE, borderBottomRightRadius: 6 },
   bubbleOther: { backgroundColor: "#EFEFEF", borderBottomLeftRadius: 6 },
+
   senderName: { fontSize: 12, color: "#666", marginBottom: 4 },
+
   msgTextMine: { color: "#fff", fontSize: 15, lineHeight: 21 },
   msgTextOther: { color: "#111", fontSize: 15, lineHeight: 21 },
 
-  // ✅ 말풍선 옆 시간(작게, 아래)
   timeBeside: {
     fontSize: 11,
     color: "#8E8E8E",
-    lineHeight: 14,
-    paddingBottom: 2, // ✅ 아래쪽으로 살짝 붙는 느낌
+    marginBottom: 2, // ✅ 말풍선 아래 느낌
   },
-  // 내 말풍선은 오른쪽에 있으니 시간은 "말풍선 왼쪽"
-  timeBesideMine: { textAlign: "left", marginRight: 6 },
-  // 상대 말풍선은 왼쪽에 있으니 시간은 "말풍선 오른쪽"
-  timeBesideOther: { textAlign: "right", marginLeft: 6 },
+  // ✅ 내 말풍선: 왼쪽 아래
+  timeMine: { textAlign: "left", marginRight: 6 },
+  // ✅ 상대 말풍선: 오른쪽 아래
+  timeOther: { textAlign: "right", marginLeft: 6 },
 
   inputBar: {
     flexDirection: "row",
