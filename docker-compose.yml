@@ -1,6 +1,6 @@
 services:
   frontend:
-    image: ghcr.io/minxseox/fe_zzaptalk:${IMAGE_TAG:-latest}
+    image: ghcr.io/minxseox/my-expo-web:latest
     container_name: zzaptalk-frontend
     restart: always
     ports:
