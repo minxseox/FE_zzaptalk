@@ -7,7 +7,10 @@ type Props = {
   text: string;
   setText: (v: string) => void;
   onSend: () => void;
-  inputRef: React.RefObject<TextInput>;
+
+  // ✅ 여기만 수정!
+  inputRef: React.RefObject<TextInput | null>;
+
   onHeight?: (h: number) => void;
 };
 
@@ -36,9 +39,6 @@ export default function MessageInput({
           placeholder="메세지 입력"
           value={text}
           onChangeText={setText}
-          onSubmitEditing={onSend}
-          returnKeyType="send"
-          underlineColorAndroid="transparent"
           style={[
             chatRoomStyles.input,
             Platform.OS === "web" &&
@@ -47,8 +47,10 @@ export default function MessageInput({
                 boxShadow: "none",
               } as any),
           ]}
+          underlineColorAndroid="transparent"
+          onSubmitEditing={onSend}
+          returnKeyType="send"
         />
-
         <Pressable
           style={[
             chatRoomStyles.sendFab,
