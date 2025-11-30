@@ -1,5 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   FlatList,
@@ -7,11 +14,11 @@ import {
   Keyboard,
   Platform,
   Text,
-  Pressable,
   TextInput,
   View,
   Modal,
   Image,
+  Pressable,
   TouchableWithoutFeedback,
 } from "react-native";
 
@@ -25,33 +32,26 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-// ✅ 스타일
 import {
   chatRoomStyles,
   chatRoomModalStyles,
 } from "../../src/styles/chat/ChatRoom.module";
 
-// ✅ 컴포넌트
 import ChatHeader from "../../src/components/chat/ChatHeader";
 import MessageBubble from "../../src/components/chat/MessageBubble";
 import MessageInput from "../../src/components/chat/MessageInput";
 
-// ✅ Zustand Store
 import { useChatStore } from "../../src/store/chatStore";
 import { useChatListStore } from "../../src/store/chatListStore";
 
-// ✅ API
 import { getChatMessages, getChatRoomList } from "../../src/services/chat";
 import type { ChatMessageResponse } from "../../src/types/chat";
 
-// ✅ Auth
 import { loadTokenWithExpiry } from "../../src/lib/authStorage";
 import { parseJwt } from "../../src/lib/jwt";
 
-// ✅ 친구 프로필 조회
 import { fetchFriendProfile } from "../../src/services/profile";
 
-// 소켓 모듈 (SSR 방지용 require)
 let sendChatMessageRaw: any;
 let subscribeRoom: any;
 try {
@@ -60,9 +60,6 @@ try {
   subscribeRoom = mod.subscribeRoom;
 } catch {}
 
-/* ===============================
- * 유틸
- * =============================== */
 function toNumberSafe(v: unknown): number | null {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
@@ -106,7 +103,7 @@ function formatTimeSafe(isoString: string): string {
     return new Intl.DateTimeFormat("ko-KR", {
       hour: "numeric",
       minute: "2-digit",
-      hour12: true, // ✅ 오전/오후
+      hour12: true,
     }).format(new Date(isoString));
   } catch {
     return "";
@@ -163,7 +160,6 @@ type SendStatusMap = Record<string, SendState>;
 
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
-
   const { id, title } = useLocalSearchParams<{ id?: string; title?: string }>();
   const roomId = Number(id);
 
@@ -196,8 +192,12 @@ export default function ChatRoomScreen() {
   const lastRedirectRef = useRef<Href | null>(null);
   const [inputBarH, setInputBarH] = useState(0);
 
-  // ✅ 전송 상태(실패/전송중) 맵: messageId 기준
   const [sendStatus, setSendStatus] = useState<SendStatusMap>({});
+
+  // ✅ 채팅 검색 상태
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<TextInput | null>(null);
 
   const prevLenRef = useRef(0);
   const scrollingRef = useRef(false);
@@ -304,12 +304,12 @@ export default function ChatRoomScreen() {
     prevLenRef.current = messages.length;
   }, [messages.length, mounted, safeScrollToBottom]);
 
-  // ✅ 메시지 목록 기준으로 status map 정리(남아있는 키 정리)
+  // ✅ status map 정리
   useEffect(() => {
     const ids = new Set(messages.map((m) => String(m.messageId)));
     setSendStatus((prev) => {
-      let changed = false;
       const next: SendStatusMap = {};
+      let changed = false;
       for (const [k, v] of Object.entries(prev)) {
         if (ids.has(k)) next[k] = v;
         else changed = true;
@@ -318,9 +318,7 @@ export default function ChatRoomScreen() {
     });
   }, [messages]);
 
-  if (!navReady) return null;
-  if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
-
+  // ✅ 소켓 구독
   useEffect(() => {
     if (!subscribeRoom) return;
 
@@ -336,6 +334,9 @@ export default function ChatRoomScreen() {
     return () => unsub?.();
   }, [roomId]);
 
+  if (!navReady) return null;
+  if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
+
   const markStatus = useCallback((msgId: number, s?: SendState) => {
     const key = String(msgId);
     setSendStatus((prev) => {
@@ -346,6 +347,17 @@ export default function ChatRoomScreen() {
     });
   }, []);
 
+  const deleteLocalMessage = useCallback(
+    (msgId: number) => {
+      setMessages(
+        roomId,
+        messages.filter((m) => Number(m.messageId) !== Number(msgId))
+      );
+      markStatus(msgId, undefined);
+    },
+    [messages, markStatus, roomId, setMessages]
+  );
+
   const sendContent = useCallback(
     async (msgId: number, content: string) => {
       if (!myId) return;
@@ -353,13 +365,44 @@ export default function ChatRoomScreen() {
       markStatus(msgId, "sending");
       try {
         if (sendChatMessageRaw) await sendCompat(roomId, myId, content);
-        markStatus(msgId, undefined); // ✅ 성공 → 실패 UI 제거
+        markStatus(msgId, undefined); // 성공
         await syncMessages();
       } catch {
         markStatus(msgId, "failed");
       }
     },
     [myId, markStatus, roomId, syncMessages]
+  );
+
+  const openFailActionSheet = useCallback(
+    (msgId: number, content: string) => {
+      const doResend = () => sendContent(msgId, content);
+      const doDelete = () => deleteLocalMessage(msgId);
+
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: ["재전송", "삭제", "취소"],
+            cancelButtonIndex: 2,
+            destructiveButtonIndex: 1,
+            title: "전송 실패",
+            message: "어떤 작업을 할까요?",
+          },
+          (buttonIndex) => {
+            if (buttonIndex === 0) doResend();
+            if (buttonIndex === 1) doDelete();
+          }
+        );
+        return;
+      }
+
+      Alert.alert("전송 실패", "어떤 작업을 할까요?", [
+        { text: "재전송", onPress: doResend },
+        { text: "삭제", style: "destructive", onPress: doDelete },
+        { text: "취소", style: "cancel" },
+      ]);
+    },
+    [deleteLocalMessage, sendContent]
   );
 
   const onSend = useCallback(async () => {
@@ -388,9 +431,7 @@ export default function ChatRoomScreen() {
       requestAnimationFrame(() => safeScrollToBottom(true));
     });
 
-    // ✅ 실제 전송 + 실패 처리
     await sendContent(optimisticId, t);
-
     inputRef.current?.focus();
   }, [
     text,
@@ -423,6 +464,55 @@ export default function ChatRoomScreen() {
     [myId]
   );
 
+  // ✅ 검색 결과 계산 (메시지 내용 기준)
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    const out: { index: number; msg: ChatMessageResponse }[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      const c = (m.content || "").toLowerCase();
+      if (c.includes(q)) out.push({ index: i, msg: m });
+    }
+    return out;
+  }, [messages, searchQuery]);
+
+  const scrollToMessageIndex = useCallback((index: number) => {
+    try {
+      flatRef.current?.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.5,
+      });
+    } catch {}
+  }, []);
+
+  const onScrollToIndexFailed = useCallback((info: any) => {
+    // 높이 측정이 안되어 실패하면, 대충 offset으로 이동 후 재시도
+    const wait = 80;
+    flatRef.current?.scrollToOffset({
+      offset: Math.max(0, info.averageItemLength * info.index),
+      animated: true,
+    });
+    setTimeout(() => {
+      flatRef.current?.scrollToIndex({
+        index: info.index,
+        animated: true,
+        viewPosition: 0.5,
+      });
+    }, wait);
+  }, []);
+
+  const onPressSearch = useCallback(() => {
+    setSearchOpen(true);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, []);
+
   const renderItem = useCallback(
     ({ item, index }: { item: ChatMessageResponse; index: number }) => {
       const mine = myId != null && item.senderId === myId;
@@ -438,13 +528,13 @@ export default function ChatRoomScreen() {
 
       const showAvatar = !mine && isFirstOfRun;
       const showName = !mine && isFirstOfRun;
-
       const showTime = isLastOfRun;
 
       const dateText = mounted ? formatDateSafe(item.createdAt) : "";
       const timeText = mounted ? formatTimeSafe(item.createdAt) : "";
 
-      const failed = mine && sendStatus[String(item.messageId)] === "failed";
+      const local = sendStatus[String(item.messageId)]; // "sending" | "failed" | undefined
+      const status = mine ? local ?? "sent" : "sent";
 
       return (
         <View>
@@ -466,13 +556,22 @@ export default function ChatRoomScreen() {
             }}
             timeLabel={timeText}
             showTime={showTime}
-            failed={failed}
-            onRetry={() => sendContent(item.messageId as any, item.content)}
+            status={status}
+            onPressFail={() =>
+              openFailActionSheet(Number(item.messageId), item.content)
+            }
           />
         </View>
       );
     },
-    [myId, mounted, messages, handlePressAvatar, sendStatus, sendContent]
+    [
+      myId,
+      mounted,
+      messages,
+      handlePressAvatar,
+      sendStatus,
+      openFailActionSheet,
+    ]
   );
 
   return (
@@ -481,7 +580,12 @@ export default function ChatRoomScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
     >
-      <ChatHeader title={headerTitle} syncing={syncing} onBack={onBack} />
+      <ChatHeader
+        title={headerTitle}
+        syncing={syncing}
+        onBack={onBack}
+        onPressSearch={onPressSearch}
+      />
 
       {initialLoading ? (
         <View
@@ -501,6 +605,7 @@ export default function ChatRoomScreen() {
             paddingBottom: inputBarH + insets.bottom + 12,
           }}
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
+          onScrollToIndexFailed={onScrollToIndexFailed}
           extraData={mounted}
         />
       )}
@@ -513,6 +618,97 @@ export default function ChatRoomScreen() {
         onHeight={setInputBarH}
       />
 
+      {/* ✅ 검색 모달 */}
+      <Modal
+        visible={searchOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSearch}
+      >
+        <TouchableWithoutFeedback onPress={closeSearch}>
+          <View style={chatRoomStyles.searchOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={{ paddingTop: insets.top }}>
+                <View style={chatRoomStyles.searchPanel}>
+                  <View style={chatRoomStyles.searchBarRow}>
+                    <Pressable
+                      onPress={closeSearch}
+                      style={chatRoomStyles.headerBtn}
+                    >
+                      <Ionicons name="close" size={22} color="#111" />
+                    </Pressable>
+
+                    <View style={chatRoomStyles.searchInputWrap}>
+                      <TextInput
+                        ref={searchInputRef}
+                        placeholder="채팅 내용 검색"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        style={chatRoomStyles.searchInput}
+                        returnKeyType="search"
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={chatRoomStyles.searchResultWrap}>
+                  <Text style={chatRoomStyles.searchResultTitle}>
+                    {searchQuery.trim()
+                      ? `검색 결과 ${searchResults.length}개`
+                      : "검색어를 입력하세요"}
+                  </Text>
+
+                  {searchQuery.trim() && searchResults.length === 0 ? (
+                    <Text style={chatRoomStyles.searchEmpty}>
+                      결과가 없습니다.
+                    </Text>
+                  ) : (
+                    <FlatList
+                      data={searchResults}
+                      keyExtractor={(x) => String(x.msg.messageId)}
+                      renderItem={({ item }) => {
+                        const who =
+                          item.msg.senderName ||
+                          (item.msg.senderId === myId ? "Me" : "상대");
+                        const t = formatTimeSafe(item.msg.createdAt);
+                        return (
+                          <Pressable
+                            style={chatRoomStyles.searchRow}
+                            onPress={() => {
+                              closeSearch();
+                              requestAnimationFrame(() =>
+                                scrollToMessageIndex(item.index)
+                              );
+                            }}
+                          >
+                            <View style={chatRoomStyles.searchRowTop}>
+                              <Text style={chatRoomStyles.searchRowName}>
+                                {who}
+                              </Text>
+                              <Text style={chatRoomStyles.searchRowTime}>
+                                {t}
+                              </Text>
+                            </View>
+                            <Text
+                              style={chatRoomStyles.searchRowMsg}
+                              numberOfLines={2}
+                            >
+                              {item.msg.content}
+                            </Text>
+                          </Pressable>
+                        );
+                      }}
+                      keyboardShouldPersistTaps="handled"
+                    />
+                  )}
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* 프로필 모달 (기존 유지) */}
       <Modal
         visible={profileModalVisible}
         transparent
