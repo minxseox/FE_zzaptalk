@@ -1,4 +1,4 @@
-// app/chat/[id].tsx
+// app/chat/[id].tsx..
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
