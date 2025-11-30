@@ -32,6 +32,7 @@ import {
 
 import { useChatStore } from "../../src/store/chatStore";
 import { useChatListStore } from "../../src/store/chatListStore";
+import { useSocketStore } from "../../src/store/socketStore"; // ✅ 추가
 
 import { getChatMessages, getChatRoomList } from "../../src/services/chat";
 import type { ChatMessageResponse } from "../../src/types/chat";
@@ -149,16 +150,12 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
+  // ✅ 소켓 연결 상태 구독
+  const isSocketConnected = useSocketStore((state) => state.isConnected);
+
   const messages = useChatStore((state) =>
     isValidRoom ? state.messagesByRoom[roomId] ?? [] : []
   );
-  const setMessages = useChatStore((state) => state.setMessages);
-  const addMessage = useChatStore((state) => state.addMessage);
-
-  const updateRoomLastMessage = useChatListStore(
-    (state) => state.updateRoomLastMessage
-  );
-  const resetUnreadCount = useChatListStore((state) => state.resetUnreadCount);
 
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
@@ -170,8 +167,6 @@ export default function ChatRoomScreen() {
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
-
-  // ✅ 모든 Hook은 조건부 return 전에 위치!
 
   useEffect(() => {
     setMounted(true);
@@ -249,9 +244,14 @@ export default function ChatRoomScreen() {
     };
   }, [navReady, isValidRoom, roomId, redirectOnce]);
 
-  // ✅ 소켓 구독
+  // ✅ 소켓 구독 - 연결 상태 확인 추가!
   useEffect(() => {
-    if (!subscribeRoom || !isValidRoom) return;
+    // 소켓이 연결되지 않았으면 구독하지 않음
+    if (!subscribeRoom || !isValidRoom || !isSocketConnected) {
+      return;
+    }
+
+    console.log(`📡 [ChatRoom] 소켓 구독 시작: roomId=${roomId}`);
 
     const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
       console.log("📩 WS 메시지 수신:", m);
@@ -271,9 +271,10 @@ export default function ChatRoomScreen() {
     });
 
     return () => {
+      console.log(`📡 [ChatRoom] 소켓 구독 해제: roomId=${roomId}`);
       unsub?.();
     };
-  }, [roomId, isValidRoom]);
+  }, [roomId, isValidRoom, isSocketConnected]); // ✅ isSocketConnected 의존성 추가
 
   const syncMessages = useCallback(async () => {
     if (!isValidRoom) return;
