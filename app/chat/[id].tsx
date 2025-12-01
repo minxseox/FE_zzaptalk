@@ -201,7 +201,6 @@ export default function ChatRoomScreen() {
 
   const messages = useChatStore((s) => s.messagesByRoom[roomKey] ?? EMPTY);
   const setMessages = useChatStore((s) => s.setMessages);
-  // ✅ addMessage는 소켓 수신부에서만 사용합니다.
   const addMessage = useChatStore((s) => s.addMessage);
 
   const updateRoomLastMessage = useChatListStore(
@@ -238,9 +237,6 @@ export default function ChatRoomScreen() {
   const scrollingRef = useRef(false);
 
   const idSetRef = useRef<Set<string>>(new Set());
-
-  // ✅ Optimistic Ref 제거 (중복 방지 1단계: 로컬 추가 로직 제거)
-  // const pendingOptimisticRef = useRef<Map<number, { content: string; sentAtMs: number }>>(new Map());
 
   useEffect(() => setMounted(true), []);
 
@@ -401,7 +397,7 @@ export default function ChatRoomScreen() {
     [roomIdOrNull]
   );
 
-  // ✅ [수정] 소켓 수신부: 단순화됨 (Optimistic 매칭 로직 제거)
+  // ✅ 소켓 메시지 수신부
   useEffect(() => {
     if (!subscribeRoom) return;
     if (roomIdOrNull == null) return;
@@ -415,10 +411,13 @@ export default function ChatRoomScreen() {
       const normalized = normalizeRestMessage(m);
       const key = String(normalized.messageId);
 
-      // 이미 있는 메시지면 무시 (중복 방지 안전장치)
-      if (idSetRef.current.has(key)) return;
+      // 내가 방금 보낸 메시지가 서버에서 다시 오면(중복) 무시
+      if (idSetRef.current.has(key)) {
+        console.log("♻️ 중복 메시지 무시:", key);
+        return;
+      }
 
-      // 화면에 추가
+      // 새로운 메시지면 화면에 추가
       idSetRef.current.add(key);
       addMsg(roomIdOrNull, normalized);
       updateLast(roomIdOrNull, normalized.content, normalized.createdAt, true);
@@ -456,7 +455,6 @@ export default function ChatRoomScreen() {
         if (sendChatMessageRaw) await sendCompat(roomIdOrNull, myId, content);
         console.log("✅ 소켓 전송 API 호출 성공");
 
-        // 성공하면 status 제거 (메시지는 소켓으로 수신됨)
         markStatus(msgId, undefined);
       } catch {
         console.error("❌ 소켓 전송 실패");
@@ -502,7 +500,7 @@ export default function ChatRoomScreen() {
     [deleteLocalMessage, sendContent]
   );
 
-  // ✅ [수정] onSend: 로컬 추가(addMessage) 제거!
+  // ✅ [수정] onSend: "내가 보낸 건 내가 즉시 화면에 그리기"
   const onSend = useCallback(async () => {
     console.log("🚀 onSend 실행됨. 텍스트:", text);
 
@@ -512,10 +510,7 @@ export default function ChatRoomScreen() {
     }
 
     const t = text.trim();
-    if (!t) {
-      console.log("⚠️ 빈 메시지라 전송 불가");
-      return;
-    }
+    if (!t) return;
 
     if (!myId) {
       console.error("❌ myId 없음 (로그인 정보 로드 실패)");
@@ -525,16 +520,36 @@ export default function ChatRoomScreen() {
     // 1. 입력창 비우기
     setText("");
 
-    // 2. 임시 ID 생성 (전송 상태 관리용, 화면 표시는 안 함)
+    // 2. 임시 ID 및 메시지 객체 생성
+    const nowIso = new Date().toISOString();
     const optimisticId = Date.now() + Math.floor(Math.random() * 1000);
 
-    // ❌ 여기서 addMessage를 하지 않습니다! (중복 원인 제거)
-    // console.log("➕ Optimistic 메시지 추가:", optimistic);
-    // addMessage(roomIdOrNull, optimistic);
-    // updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
+    const optimisticMsg: ChatMessageResponse = {
+      messageId: optimisticId,
+      roomId: roomIdOrNull,
+      senderId: myId,
+      content: t,
+      createdAt: nowIso,
+      sentAt: nowIso,
+      senderName: "Me",
+      type: "TEXT",
+    };
 
-    // 3. 소켓 전송만 수행
-    // (서버가 메시지를 받으면 -> 구독 채널로 뿌려줌 -> useEffect에서 받아서 그림)
+    // 3. 화면에 즉시 추가 (Optimistic Update)
+    console.log("➕ 내 메시지 미리 추가:", optimisticMsg);
+
+    // 혹시 서버가 나중에 같은 ID로 메시지를 보내면 중복되지 않도록 등록
+    idSetRef.current.add(String(optimisticId));
+
+    addMessage(roomIdOrNull, optimisticMsg);
+    updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
+
+    // 4. 스크롤 아래로
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => safeScrollToBottom(true));
+    });
+
+    // 5. 소켓 전송
     await sendContent(optimisticId, t);
 
     inputRef.current?.focus();
@@ -543,9 +558,9 @@ export default function ChatRoomScreen() {
     text,
     myId,
     roomIdOrNull,
-    // addMessage, // 의존성 제거
-    // updateRoomLastMessage, // 의존성 제거
-    // safeScrollToBottom, // 의존성 제거
+    addMessage,
+    updateRoomLastMessage,
+    safeScrollToBottom,
     sendContent,
   ]);
 
@@ -731,7 +746,7 @@ export default function ChatRoomScreen() {
         onHeight={setInputBarH}
       />
 
-      {/* 검색 모달 등 기존 UI 유지 */}
+      {/* 검색 모달 */}
       <Modal
         visible={searchOpen}
         transparent
@@ -821,6 +836,7 @@ export default function ChatRoomScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* 프로필 모달 */}
       <Modal
         visible={profileModalVisible}
         transparent
