@@ -52,7 +52,7 @@ function MessageBubble({
           >
             <View style={chatRoomStyles.avatarPlaceholder}>
               <Text style={chatRoomStyles.avatarInitial}>
-                {senderName?.charAt(0) ?? "?"}
+                {(senderName ?? "?").charAt(0)}
               </Text>
             </View>
           </Pressable>
@@ -62,7 +62,7 @@ function MessageBubble({
       ) : null}
 
       <View style={chatRoomStyles.bubbleLine}>
-        {/* ✅ 내 시간: 말풍선 "왼쪽 아래" */}
+        {/* 내 시간: 말풍선 왼쪽 아래 */}
         {mine && showTime ? (
           <Text style={[chatRoomStyles.timeBeside, chatRoomStyles.timeMine]}>
             {timeLabel}
@@ -83,21 +83,20 @@ function MessageBubble({
             style={
               mine ? chatRoomStyles.msgTextMine : chatRoomStyles.msgTextOther
             }
-            // ✅ 텍스트 복사 허용 (UX 필수)
-            selectable={true}
+            selectable
           >
             {content}
           </Text>
         </View>
 
-        {/* ✅ 상대 시간: 말풍선 "오른쪽 아래" */}
+        {/* 상대 시간: 말풍선 오른쪽 아래 */}
         {!mine && showTime ? (
           <Text style={[chatRoomStyles.timeBeside, chatRoomStyles.timeOther]}>
             {timeLabel}
           </Text>
         ) : null}
 
-        {/* ✅ 실패 아이콘(!)만 표시 → 누르면 액션시트 */}
+        {/* 실패 아이콘 */}
         {showFail ? (
           <Pressable
             style={chatRoomStyles.failIconBtn}
@@ -112,5 +111,20 @@ function MessageBubble({
   );
 }
 
-// ✅ 렌더링 최적화: props가 같으면 다시 그리지 않음
-export default memo(MessageBubble);
+/**
+ * ✅ RN Web에서 FlatList virtualization + useCallback 조합이면
+ * "보내졌는데 화면이 갱신 안 된 것처럼" 보이는 케이스가 나올 수 있어서
+ * memo를 쓰되, 비교를 명시적으로 해줌.
+ */
+export default memo(MessageBubble, (a, b) => {
+  return (
+    a.mine === b.mine &&
+    a.content === b.content &&
+    a.senderName === b.senderName &&
+    a.showName === b.showName &&
+    a.showAvatar === b.showAvatar &&
+    a.timeLabel === b.timeLabel &&
+    a.showTime === b.showTime &&
+    a.status === b.status
+  );
+});

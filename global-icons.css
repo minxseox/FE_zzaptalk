@@ -24,11 +24,18 @@
   font-display: swap;
 }
 
+/* ✅ RN Web 레이아웃 높이 0 방지 (FlatList/ScrollView가 안 보이는 원인 1순위) */
 html,
 body,
 #root {
   height: 100%;
 }
+
 body {
   margin: 0;
+}
+
+/* expo-router/RNWeb에서 root 내부 컨테이너가 height를 못 받는 케이스 대비 */
+#root > div {
+  height: 100%;
 }

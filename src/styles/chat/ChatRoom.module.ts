@@ -38,7 +38,13 @@ export const chatRoomStyles = StyleSheet.create({
     overflow: "hidden",
   },
 
-  msgRow: { flexDirection: "row", marginVertical: 6, paddingHorizontal: 6 },
+  msgRow: {
+    flexDirection: "row",
+    marginVertical: 6,
+    paddingHorizontal: 6,
+    // ✅ RN Web: 부모 폭 계산 꼬일 때 대비
+    minWidth: 0,
+  },
   msgRowMine: { justifyContent: "flex-end" },
   msgRowOther: { justifyContent: "flex-start" },
 
@@ -54,13 +60,22 @@ export const chatRoomStyles = StyleSheet.create({
   avatarInitial: { fontSize: 14, color: "#666", fontWeight: "600" },
   avatarSpacer: { width: 34, marginRight: 8 },
 
-  bubbleLine: { flexDirection: "row", alignItems: "flex-end", maxWidth: "88%" },
+  // ✅ 여기 중요: RN Web에서 maxWidth/%만 두면 폭 0되는 케이스가 있어서 flexShrink 추가
+  bubbleLine: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    maxWidth: "88%",
+    flexShrink: 1,
+    minWidth: 0,
+  },
 
   bubble: {
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 16,
     maxWidth: "100%",
+    flexShrink: 1,
+    minWidth: 0,
   },
   bubbleMine: { backgroundColor: PURPLE, borderBottomRightRadius: 6 },
   bubbleOther: { backgroundColor: "#EFEFEF", borderBottomLeftRadius: 6 },
@@ -73,7 +88,6 @@ export const chatRoomStyles = StyleSheet.create({
   timeMine: { textAlign: "left", marginRight: 4 },
   timeOther: { textAlign: "right", marginLeft: 4 },
 
-  // ✅ 실패 아이콘(카톡 느낌)
   failIconBtn: {
     marginLeft: 6,
     alignSelf: "flex-end",
@@ -114,6 +128,7 @@ export const chatRoomStyles = StyleSheet.create({
     borderRadius: 22,
     minHeight: 44,
     justifyContent: "center",
+    minWidth: 0,
   },
   input: {
     paddingLeft: 14,
@@ -123,7 +138,6 @@ export const chatRoomStyles = StyleSheet.create({
     color: "#111",
     maxHeight: 120,
 
-    // ✅ RN Web 포커스 박스 제거
     ...(Platform.OS === "web"
       ? ({
           outlineStyle: "none",
@@ -145,22 +159,14 @@ export const chatRoomStyles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // ✅ 검색 UI
-  searchOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.25)",
-  },
+  searchOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.25)" },
   searchPanel: {
     backgroundColor: "#fff",
     paddingHorizontal: 12,
     paddingTop: 10,
     paddingBottom: 12,
   },
-  searchBarRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
+  searchBarRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   searchInputWrap: {
     flex: 1,
     height: 40,
@@ -168,12 +174,9 @@ export const chatRoomStyles = StyleSheet.create({
     backgroundColor: "#F2F2F5",
     paddingHorizontal: 12,
     justifyContent: "center",
+    minWidth: 0,
   },
-  searchInput: {
-    fontSize: 14,
-    color: "#111",
-    paddingVertical: 0,
-  },
+  searchInput: { fontSize: 14, color: "#111", paddingVertical: 0 },
   searchResultWrap: {
     backgroundColor: "#fff",
     paddingHorizontal: 12,
