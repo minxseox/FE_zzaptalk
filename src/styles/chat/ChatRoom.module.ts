@@ -40,10 +40,9 @@ export const chatRoomStyles = StyleSheet.create({
 
   msgRow: {
     flexDirection: "row",
+    width: "100%",
     marginVertical: 6,
-    paddingHorizontal: 6,
-    // ✅ RN Web: 부모 폭 계산 꼬일 때 대비
-    minWidth: 0,
+    paddingHorizontal: 12,
   },
   msgRowMine: { justifyContent: "flex-end" },
   msgRowOther: { justifyContent: "flex-start" },
@@ -60,22 +59,17 @@ export const chatRoomStyles = StyleSheet.create({
   avatarInitial: { fontSize: 14, color: "#666", fontWeight: "600" },
   avatarSpacer: { width: 34, marginRight: 8 },
 
-  // ✅ 여기 중요: RN Web에서 maxWidth/%만 두면 폭 0되는 케이스가 있어서 flexShrink 추가
   bubbleLine: {
     flexDirection: "row",
     alignItems: "flex-end",
-    maxWidth: "88%",
-    flexShrink: 1,
-    minWidth: 0,
+    maxWidth: "85%",
   },
 
   bubble: {
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 16,
-    maxWidth: "100%",
     flexShrink: 1,
-    minWidth: 0,
   },
   bubbleMine: { backgroundColor: PURPLE, borderBottomRightRadius: 6 },
   bubbleOther: { backgroundColor: "#EFEFEF", borderBottomLeftRadius: 6 },
@@ -85,8 +79,20 @@ export const chatRoomStyles = StyleSheet.create({
   msgTextOther: { color: "#111", fontSize: 15, lineHeight: 21 },
 
   timeBeside: { fontSize: 11, color: "#8E8E8E", alignSelf: "flex-end" },
-  timeMine: { textAlign: "left", marginRight: 4 },
-  timeOther: { textAlign: "right", marginLeft: 4 },
+
+  // ✅ [수정] 중복된 textAlign 제거
+  timeMine: {
+    marginRight: 4,
+    minWidth: 45,
+    textAlign: "right",
+  },
+
+  // ✅ [수정] 중복된 textAlign 제거
+  timeOther: {
+    marginLeft: 4,
+    minWidth: 45,
+    textAlign: "left",
+  },
 
   failIconBtn: {
     marginLeft: 6,
@@ -128,7 +134,6 @@ export const chatRoomStyles = StyleSheet.create({
     borderRadius: 22,
     minHeight: 44,
     justifyContent: "center",
-    minWidth: 0,
   },
   input: {
     paddingLeft: 14,
@@ -137,14 +142,11 @@ export const chatRoomStyles = StyleSheet.create({
     fontSize: 14,
     color: "#111",
     maxHeight: 120,
-
     ...(Platform.OS === "web"
       ? ({
           outlineStyle: "none",
-          outlineWidth: 0,
-          boxShadow: "none",
         } as any)
-      : null),
+      : {}),
   },
   sendFab: {
     position: "absolute",
@@ -174,7 +176,6 @@ export const chatRoomStyles = StyleSheet.create({
     backgroundColor: "#F2F2F5",
     paddingHorizontal: 12,
     justifyContent: "center",
-    minWidth: 0,
   },
   searchInput: { fontSize: 14, color: "#111", paddingVertical: 0 },
   searchResultWrap: {

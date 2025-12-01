@@ -1,4 +1,3 @@
-// app/chat/[id].tsx (ChatRoomScreen)
 import React, {
   useCallback,
   useEffect,
@@ -212,7 +211,7 @@ export default function ChatRoomScreen() {
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
 
-  // ---------- [1] 여기에 디버깅 로그 추가 ----------
+  // ---------- [1] 디버깅 로그 ----------
   useEffect(() => {
     console.log("=== [ChatRoomScreen] 상태 확인 ===");
     console.log("roomId:", roomIdOrNull);
@@ -409,7 +408,7 @@ export default function ChatRoomScreen() {
     const updateLast = useChatListStore.getState().updateRoomLastMessage;
 
     const unsub = subscribeRoom(roomIdOrNull, (m: ChatMessageResponse) => {
-      console.log("📩 소켓 메시지 수신:", m); // ✅ 수신 확인용 로그
+      console.log("📩 소켓 메시지 수신:", m);
 
       const normalized = normalizeRestMessage(m);
       const key = String(normalized.messageId);
@@ -479,7 +478,7 @@ export default function ChatRoomScreen() {
       markStatus(msgId, "sending");
       try {
         if (sendChatMessageRaw) await sendCompat(roomIdOrNull, myId, content);
-        console.log("✅ 소켓 전송 API 호출 성공"); // ✅ 전송 확인용 로그
+        console.log("✅ 소켓 전송 API 호출 성공");
         markStatus(msgId, undefined);
 
         setTimeout(() => {
@@ -488,12 +487,17 @@ export default function ChatRoomScreen() {
           }
         }, 1200);
       } catch {
-        console.error("❌ 소켓 전송 실패"); // ✅ 실패 확인용 로그
+        console.error("❌ 소켓 전송 실패");
         markStatus(msgId, "failed");
       }
     },
     [myId, markStatus, roomIdOrNull, syncMessages]
   );
+
+  //리렌더 로그 확인
+  useEffect(() => {
+    console.log("[UI] messages length =", messages.length);
+  }, [messages.length]);
 
   const openFailActionSheet = useCallback(
     (msgId: number, content: string) => {
@@ -527,7 +531,7 @@ export default function ChatRoomScreen() {
   );
 
   const onSend = useCallback(async () => {
-    console.log("🚀 onSend 실행됨. 텍스트:", text); // ✅ [2] 여기에 디버깅 로그 추가
+    console.log("🚀 onSend 실행됨. 텍스트:", text);
 
     if (initialLoading) {
       console.log("⚠️ 아직 로딩중이라 전송 불가");
@@ -564,7 +568,7 @@ export default function ChatRoomScreen() {
       sentAtMs: Date.now(),
     });
 
-    console.log("➕ Optimistic 메시지 추가:", optimistic); // ✅ 로그 추가
+    console.log("➕ Optimistic 메시지 추가:", optimistic);
     addMessage(roomIdOrNull, optimistic);
     updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
     setText("");
@@ -585,8 +589,6 @@ export default function ChatRoomScreen() {
     safeScrollToBottom,
     sendContent,
   ]);
-
-  // ... (나머지 코드는 동일) ...
 
   const handlePressAvatar = useCallback(
     async (senderId: number) => {
@@ -757,7 +759,11 @@ export default function ChatRoomScreen() {
           }}
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
           onScrollToIndexFailed={onScrollToIndexFailed}
-          extraData={mounted}
+          /**
+           * ✅ [수정] extraData가 기존엔 mounted만 보고 있었으나,
+           * sendStatus(전송 중/완료)가 바뀌거나 myId가 로드되었을 때도 리렌더링 되어야 하므로 배열로 전달.
+           */
+          extraData={[mounted, sendStatus, myId]}
         />
       )}
 
