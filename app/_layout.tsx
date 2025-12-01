@@ -13,6 +13,7 @@ import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { restoreSession, onAuthChange } from "../src/lib/authSession";
 import { loadTokenWithExpiry } from "../src/lib/authStorage";
 import { connectStomp, disconnectStomp } from "../src/services/socket";
+import "../global-icons.css";
 
 const PUBLIC = new Set<string>(["/login", "/signup"]);
 const norm = (p: string) => {

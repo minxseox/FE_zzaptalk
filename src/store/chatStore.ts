@@ -11,11 +11,15 @@ interface ChatState {
 
 const EMPTY: ChatMessageResponse[] = [];
 
+function validRoomId(roomId: number) {
+  return Number.isFinite(roomId) && roomId >= 0;
+}
+
 function sameMessageList(a: ChatMessageResponse[], b: ChatMessageResponse[]) {
   if (a === b) return true;
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i].messageId !== b[i].messageId) return false;
+    if (String(a[i].messageId) !== String(b[i].messageId)) return false;
   }
   return true;
 }
@@ -25,9 +29,15 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setMessages: (roomId, msgs) =>
     set((state) => {
-      const prev = state.messagesByRoom[roomId] ?? EMPTY;
+      if (!validRoomId(roomId)) {
+        console.warn(
+          "[ChatStore] setMessages ignored. invalid roomId:",
+          roomId
+        );
+        return state;
+      }
 
-      // ✅ 같은 리스트면 상태 업데이트 스킵 (렌더/루프 방지에 도움)
+      const prev = state.messagesByRoom[roomId] ?? EMPTY;
       if (sameMessageList(prev, msgs)) return state;
 
       return {
@@ -40,13 +50,18 @@ export const useChatStore = create<ChatState>((set) => ({
 
   addMessage: (roomId, msg) =>
     set((state) => {
+      if (!validRoomId(roomId)) {
+        console.warn("[ChatStore] addMessage ignored. invalid roomId:", roomId);
+        return state;
+      }
+
       const prev = state.messagesByRoom[roomId] ?? EMPTY;
 
-      // ✅ messageId 기준 중복 방지
-      const exists = prev.some((m) => m.messageId === msg.messageId);
+      const msgKey = String((msg as any).messageId);
+      const exists = prev.some((m) => String((m as any).messageId) === msgKey);
       if (exists) {
-        console.log(`[ChatStore] 중복 메시지 무시: ${msg.messageId}`);
-        return state; // 상태 변경 없음
+        // 중복이면 그대로
+        return state;
       }
 
       return {
@@ -59,6 +74,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   clearRoom: (roomId) =>
     set((state) => {
+      if (!validRoomId(roomId)) return state;
       if (!(roomId in state.messagesByRoom)) return state;
 
       const copy = { ...state.messagesByRoom };

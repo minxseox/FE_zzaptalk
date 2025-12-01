@@ -1,8 +1,8 @@
-// app/chat/[id].tsx (또는 ChatRoomScreen 컴포넌트)
+// app/chat/[id].tsx (ChatRoomScreen)
 import React, {
   useCallback,
   useEffect,
-  useLayoutEffect, // ✅ [필수] Web Flash 방지
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -169,6 +169,7 @@ async function getMyId(): Promise<number | null> {
   }
 }
 
+/** ✅ 항상 (roomId, myId, content)로 호출 */
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
   return sendChatMessageRaw(roomId, myId, content);
@@ -182,7 +183,13 @@ type SendStatusMap = Record<string, SendState>;
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
   const { id, title } = useLocalSearchParams<{ id?: string; title?: string }>();
-  const roomId = Number(id);
+
+  // ✅ 핵심: roomId가 NaN일 때 store/구독/전송을 절대 하지 않게 만들기
+  const roomIdOrNull = useMemo(() => {
+    const n = Number(id);
+    return Number.isFinite(n) ? n : null;
+  }, [id]);
+  const roomKey = roomIdOrNull ?? -1; // 훅 호출용 안전 키(쓰기 금지)
 
   const router = useRouter();
   const rootNav = useRootNavigationState();
@@ -195,7 +202,8 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  const messages = useChatStore((s) => s.messagesByRoom[roomId] ?? EMPTY);
+  // ✅ selector는 roomKey로 (roomIdOrNull일 땐 곧 Redirect 되니 여기서는 안전키로만)
+  const messages = useChatStore((s) => s.messagesByRoom[roomKey] ?? EMPTY);
   const setMessages = useChatStore((s) => s.setMessages);
   const addMessage = useChatStore((s) => s.addMessage);
 
@@ -229,6 +237,7 @@ export default function ChatRoomScreen() {
 
   useEffect(() => setMounted(true), []);
 
+  // messages가 바뀔 때마다 id set 갱신
   useEffect(() => {
     idSetRef.current = new Set(messages.map((m) => String(m.messageId)));
   }, [messages]);
@@ -271,6 +280,9 @@ export default function ChatRoomScreen() {
   }, [router]);
 
   const initialLoad = useCallback(async () => {
+    // ✅ roomId가 확정된 경우에만 로드
+    if (roomIdOrNull == null) return;
+
     try {
       try {
         await getChatRoomList();
@@ -278,18 +290,19 @@ export default function ChatRoomScreen() {
         if (e?.status === 401) return redirectOnce("/login" as Href);
       }
 
-      const data = await getChatMessages(roomId);
+      const data = await getChatMessages(roomIdOrNull);
       const sorted = data
         .map(normalizeRestMessage)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 
-      const cur = useChatStore.getState().messagesByRoom[roomId] ?? EMPTY;
+      const cur = useChatStore.getState().messagesByRoom[roomIdOrNull] ?? EMPTY;
       const merged = mergeDedupeSort(cur, sorted);
-      setMessages(roomId, merged);
+
+      setMessages(roomIdOrNull, merged);
 
       if (merged.length > 0) {
         const last = merged[merged.length - 1];
-        updateRoomLastMessage(roomId, last.content, last.createdAt, true);
+        updateRoomLastMessage(roomIdOrNull, last.content, last.createdAt, true);
       }
     } catch (e: any) {
       if (e?.status === 401) return redirectOnce("/login" as Href);
@@ -297,38 +310,43 @@ export default function ChatRoomScreen() {
     } finally {
       setInitialLoading(false);
     }
-  }, [roomId, redirectOnce, setMessages, updateRoomLastMessage]);
+  }, [roomIdOrNull, redirectOnce, setMessages, updateRoomLastMessage]);
 
   const syncMessages = useCallback(async () => {
+    if (roomIdOrNull == null) return;
+
     setSyncing(true);
     try {
-      const data = await getChatMessages(roomId);
+      const data = await getChatMessages(roomIdOrNull);
       const sorted = data
         .map(normalizeRestMessage)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 
-      const cur = useChatStore.getState().messagesByRoom[roomId] ?? EMPTY;
+      const cur = useChatStore.getState().messagesByRoom[roomIdOrNull] ?? EMPTY;
       const merged = mergeDedupeSort(cur, sorted);
-      setMessages(roomId, merged);
+
+      setMessages(roomIdOrNull, merged);
 
       if (merged.length > 0) {
         const last = merged[merged.length - 1];
-        updateRoomLastMessage(roomId, last.content, last.createdAt, true);
+        updateRoomLastMessage(roomIdOrNull, last.content, last.createdAt, true);
       }
     } catch (e: any) {
       if (e?.status === 401) return redirectOnce("/login" as Href);
     } finally {
       setSyncing(false);
     }
-  }, [roomId, redirectOnce, setMessages, updateRoomLastMessage]);
+  }, [roomIdOrNull, redirectOnce, setMessages, updateRoomLastMessage]);
 
   useEffect(() => {
     if (!navReady) return;
-    initialLoad();
-    resetUnreadCount(roomId);
-  }, [navReady, roomId]);
+    if (roomIdOrNull == null) return;
 
-  // ✅ [수정] useLayoutEffect로 스크롤 깜빡임 제거
+    initialLoad();
+    resetUnreadCount(roomIdOrNull);
+  }, [navReady, roomIdOrNull, initialLoad, resetUnreadCount]);
+
+  // ✅ 스크롤 깜빡임 방지 + 새 메시지 오면 아래로
   useLayoutEffect(() => {
     if (!mounted) return;
     if (messages.length > prevLenRef.current) {
@@ -337,15 +355,15 @@ export default function ChatRoomScreen() {
     prevLenRef.current = messages.length;
   }, [messages.length, mounted, safeScrollToBottom]);
 
-  // ✅ [수정] 웹 입장 시 자동 포커스
+  // ✅ 웹 입장 시 자동 포커스
   useEffect(() => {
     if (!initialLoading && Platform.OS === "web") {
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
+      const t = setTimeout(() => inputRef.current?.focus(), 100);
+      return () => clearTimeout(t);
     }
   }, [initialLoading]);
 
+  // ✅ status map 정리
   useEffect(() => {
     const ids = new Set(messages.map((m) => String(m.messageId)));
     setSendStatus((prev) => {
@@ -361,10 +379,12 @@ export default function ChatRoomScreen() {
 
   const removeMessageByIdNow = useCallback(
     (msgId: number) => {
+      if (roomIdOrNull == null) return;
+
       const st = useChatStore.getState();
-      const cur = st.messagesByRoom[roomId] ?? EMPTY;
+      const cur = st.messagesByRoom[roomIdOrNull] ?? EMPTY;
       st.setMessages(
-        roomId,
+        roomIdOrNull,
         cur.filter((m) => String(m.messageId) !== String(msgId))
       );
 
@@ -376,21 +396,25 @@ export default function ChatRoomScreen() {
 
       idSetRef.current.delete(String(msgId));
     },
-    [roomId]
+    [roomIdOrNull]
   );
 
+  // ✅ 소켓 구독 (roomId 확정된 경우에만)
   useEffect(() => {
     if (!subscribeRoom) return;
+    if (roomIdOrNull == null) return;
 
     const addMsg = useChatStore.getState().addMessage;
     const updateLast = useChatListStore.getState().updateRoomLastMessage;
 
-    const unsub = subscribeRoom(roomId, (m: ChatMessageResponse) => {
+    const unsub = subscribeRoom(roomIdOrNull, (m: ChatMessageResponse) => {
       const normalized = normalizeRestMessage(m);
       const key = String(normalized.messageId);
 
+      // 1) messageId 중복 방지
       if (idSetRef.current.has(key)) return;
 
+      // 2) 내 메시지면 optimistic 교체 시도
       if (myId != null && normalized.senderId === myId) {
         const now = Date.now();
         const serverAt = Date.parse(normalized.createdAt);
@@ -419,16 +443,20 @@ export default function ChatRoomScreen() {
         }
       }
 
+      // 3) 서버 메시지 추가
       idSetRef.current.add(key);
-      addMsg(roomId, normalized);
-      updateLast(roomId, normalized.content, normalized.createdAt, true);
+      addMsg(roomIdOrNull, normalized);
+      updateLast(roomIdOrNull, normalized.content, normalized.createdAt, true);
     });
 
     return () => unsub?.();
-  }, [roomId, myId, removeMessageByIdNow]);
+  }, [roomIdOrNull, myId, removeMessageByIdNow]);
 
+  // ✅ navReady 전에는 렌더 멈춤 (hydration 안정)
   if (!navReady) return null;
-  if (!Number.isFinite(roomId)) return <Redirect href={"/chatlist" as Href} />;
+
+  // ✅ roomId가 아직 없거나 이상하면 바로 리다이렉트 (store에 NaN 쓰는 것 방지)
+  if (roomIdOrNull == null) return <Redirect href={"/chatlist" as Href} />;
 
   const markStatus = useCallback((msgId: number, s?: SendState) => {
     const key = String(msgId);
@@ -453,9 +481,10 @@ export default function ChatRoomScreen() {
 
       markStatus(msgId, "sending");
       try {
-        if (sendChatMessageRaw) await sendCompat(roomId, myId, content);
+        if (sendChatMessageRaw) await sendCompat(roomIdOrNull, myId, content);
         markStatus(msgId, undefined);
 
+        // 서버가 sender에게 echo 안 해주는 환경 대비: pending이면 한번 더 sync
         setTimeout(() => {
           if (pendingOptimisticRef.current.has(msgId)) {
             syncMessages();
@@ -465,7 +494,7 @@ export default function ChatRoomScreen() {
         markStatus(msgId, "failed");
       }
     },
-    [myId, markStatus, roomId, syncMessages]
+    [myId, markStatus, roomIdOrNull, syncMessages]
   );
 
   const openFailActionSheet = useCallback(
@@ -510,7 +539,7 @@ export default function ChatRoomScreen() {
 
     const optimistic: ChatMessageResponse = {
       messageId: optimisticId,
-      roomId,
+      roomId: roomIdOrNull,
       senderId: myId,
       content: t,
       createdAt: nowIso,
@@ -524,8 +553,9 @@ export default function ChatRoomScreen() {
       sentAtMs: Date.now(),
     });
 
-    addMessage(roomId, optimistic);
-    updateRoomLastMessage(roomId, t, nowIso, true);
+    // ✅ 여기서 바로 store에 들어가야 화면에 보여야 정상
+    addMessage(roomIdOrNull, optimistic);
+    updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
     setText("");
 
     requestAnimationFrame(() => {
@@ -538,7 +568,7 @@ export default function ChatRoomScreen() {
     initialLoading,
     text,
     myId,
-    roomId,
+    roomIdOrNull,
     addMessage,
     updateRoomLastMessage,
     safeScrollToBottom,
@@ -679,7 +709,6 @@ export default function ChatRoomScreen() {
       style={{ flex: 1, backgroundColor: "#fafafa" }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
-      // ✅ [수정] 웹에서는 KeyboardAvoidingView 기능 끄기
       enabled={Platform.OS !== "web"}
     >
       <ChatHeader
@@ -705,6 +734,7 @@ export default function ChatRoomScreen() {
           contentContainerStyle={{
             padding: 12,
             paddingBottom: inputBarH + insets.bottom + 12,
+            flexGrow: 1, // ✅ 웹에서 높이 0 되는 케이스 완화
           }}
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
           onScrollToIndexFailed={onScrollToIndexFailed}
@@ -829,9 +859,7 @@ export default function ChatRoomScreen() {
                       <View style={chatRoomModalStyles.bgContainer}>
                         {selectedProfile.backgroundPhotoUrl ? (
                           <Image
-                            source={{
-                              uri: selectedProfile.backgroundPhotoUrl,
-                            }}
+                            source={{ uri: selectedProfile.backgroundPhotoUrl }}
                             style={chatRoomModalStyles.bgImage}
                           />
                         ) : (
@@ -855,9 +883,7 @@ export default function ChatRoomScreen() {
                         <View style={chatRoomModalStyles.avatarContainer}>
                           {selectedProfile.profilePhotoUrl ? (
                             <Image
-                              source={{
-                                uri: selectedProfile.profilePhotoUrl,
-                              }}
+                              source={{ uri: selectedProfile.profilePhotoUrl }}
                               style={chatRoomModalStyles.avatar}
                             />
                           ) : (
