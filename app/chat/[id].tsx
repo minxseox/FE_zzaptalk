@@ -54,7 +54,7 @@ import { parseJwt } from "../../src/lib/jwt";
 
 import { fetchFriendProfile } from "../../src/services/profile";
 
-/** ✅ socket 모듈 로드(실패를 숨기지 않음) */
+/** ✅ socket 모듈 로드 */
 let sendChatMessageRaw: any;
 let subscribeRoom: any;
 try {
@@ -169,7 +169,6 @@ async function getMyId(): Promise<number | null> {
   }
 }
 
-/** ✅ 항상 (roomId, myId, content)로 호출 */
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
   return sendChatMessageRaw(roomId, myId, content);
@@ -184,12 +183,11 @@ export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
   const { id, title } = useLocalSearchParams<{ id?: string; title?: string }>();
 
-  // ✅ 핵심: roomId가 NaN일 때 store/구독/전송을 절대 하지 않게 만들기
   const roomIdOrNull = useMemo(() => {
     const n = Number(id);
     return Number.isFinite(n) ? n : null;
   }, [id]);
-  const roomKey = roomIdOrNull ?? -1; // 훅 호출용 안전 키(쓰기 금지)
+  const roomKey = roomIdOrNull ?? -1;
 
   const router = useRouter();
   const rootNav = useRootNavigationState();
@@ -202,7 +200,6 @@ export default function ChatRoomScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ✅ selector는 roomKey로 (roomIdOrNull일 땐 곧 Redirect 되니 여기서는 안전키로만)
   const messages = useChatStore((s) => s.messagesByRoom[roomKey] ?? EMPTY);
   const setMessages = useChatStore((s) => s.setMessages);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -214,6 +211,16 @@ export default function ChatRoomScreen() {
 
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
+
+  // ---------- [1] 여기에 디버깅 로그 추가 ----------
+  useEffect(() => {
+    console.log("=== [ChatRoomScreen] 상태 확인 ===");
+    console.log("roomId:", roomIdOrNull);
+    console.log("myId:", myId);
+    console.log("messages 개수:", messages.length);
+    console.log("initialLoading:", initialLoading);
+  }, [roomIdOrNull, myId, messages.length, initialLoading]);
+  // ---------------------------------------------
 
   const flatRef = useRef<FlatList<ChatMessageResponse> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
@@ -237,7 +244,6 @@ export default function ChatRoomScreen() {
 
   useEffect(() => setMounted(true), []);
 
-  // messages가 바뀔 때마다 id set 갱신
   useEffect(() => {
     idSetRef.current = new Set(messages.map((m) => String(m.messageId)));
   }, [messages]);
@@ -280,7 +286,6 @@ export default function ChatRoomScreen() {
   }, [router]);
 
   const initialLoad = useCallback(async () => {
-    // ✅ roomId가 확정된 경우에만 로드
     if (roomIdOrNull == null) return;
 
     try {
@@ -346,7 +351,6 @@ export default function ChatRoomScreen() {
     resetUnreadCount(roomIdOrNull);
   }, [navReady, roomIdOrNull, initialLoad, resetUnreadCount]);
 
-  // ✅ 스크롤 깜빡임 방지 + 새 메시지 오면 아래로
   useLayoutEffect(() => {
     if (!mounted) return;
     if (messages.length > prevLenRef.current) {
@@ -355,7 +359,6 @@ export default function ChatRoomScreen() {
     prevLenRef.current = messages.length;
   }, [messages.length, mounted, safeScrollToBottom]);
 
-  // ✅ 웹 입장 시 자동 포커스
   useEffect(() => {
     if (!initialLoading && Platform.OS === "web") {
       const t = setTimeout(() => inputRef.current?.focus(), 100);
@@ -363,7 +366,6 @@ export default function ChatRoomScreen() {
     }
   }, [initialLoading]);
 
-  // ✅ status map 정리
   useEffect(() => {
     const ids = new Set(messages.map((m) => String(m.messageId)));
     setSendStatus((prev) => {
@@ -399,7 +401,6 @@ export default function ChatRoomScreen() {
     [roomIdOrNull]
   );
 
-  // ✅ 소켓 구독 (roomId 확정된 경우에만)
   useEffect(() => {
     if (!subscribeRoom) return;
     if (roomIdOrNull == null) return;
@@ -408,13 +409,13 @@ export default function ChatRoomScreen() {
     const updateLast = useChatListStore.getState().updateRoomLastMessage;
 
     const unsub = subscribeRoom(roomIdOrNull, (m: ChatMessageResponse) => {
+      console.log("📩 소켓 메시지 수신:", m); // ✅ 수신 확인용 로그
+
       const normalized = normalizeRestMessage(m);
       const key = String(normalized.messageId);
 
-      // 1) messageId 중복 방지
       if (idSetRef.current.has(key)) return;
 
-      // 2) 내 메시지면 optimistic 교체 시도
       if (myId != null && normalized.senderId === myId) {
         const now = Date.now();
         const serverAt = Date.parse(normalized.createdAt);
@@ -443,7 +444,6 @@ export default function ChatRoomScreen() {
         }
       }
 
-      // 3) 서버 메시지 추가
       idSetRef.current.add(key);
       addMsg(roomIdOrNull, normalized);
       updateLast(roomIdOrNull, normalized.content, normalized.createdAt, true);
@@ -452,10 +452,7 @@ export default function ChatRoomScreen() {
     return () => unsub?.();
   }, [roomIdOrNull, myId, removeMessageByIdNow]);
 
-  // ✅ navReady 전에는 렌더 멈춤 (hydration 안정)
   if (!navReady) return null;
-
-  // ✅ roomId가 아직 없거나 이상하면 바로 리다이렉트 (store에 NaN 쓰는 것 방지)
   if (roomIdOrNull == null) return <Redirect href={"/chatlist" as Href} />;
 
   const markStatus = useCallback((msgId: number, s?: SendState) => {
@@ -482,15 +479,16 @@ export default function ChatRoomScreen() {
       markStatus(msgId, "sending");
       try {
         if (sendChatMessageRaw) await sendCompat(roomIdOrNull, myId, content);
+        console.log("✅ 소켓 전송 API 호출 성공"); // ✅ 전송 확인용 로그
         markStatus(msgId, undefined);
 
-        // 서버가 sender에게 echo 안 해주는 환경 대비: pending이면 한번 더 sync
         setTimeout(() => {
           if (pendingOptimisticRef.current.has(msgId)) {
             syncMessages();
           }
         }, 1200);
       } catch {
+        console.error("❌ 소켓 전송 실패"); // ✅ 실패 확인용 로그
         markStatus(msgId, "failed");
       }
     },
@@ -529,10 +527,23 @@ export default function ChatRoomScreen() {
   );
 
   const onSend = useCallback(async () => {
-    if (initialLoading) return;
+    console.log("🚀 onSend 실행됨. 텍스트:", text); // ✅ [2] 여기에 디버깅 로그 추가
+
+    if (initialLoading) {
+      console.log("⚠️ 아직 로딩중이라 전송 불가");
+      return;
+    }
 
     const t = text.trim();
-    if (!t || !myId) return;
+    if (!t) {
+      console.log("⚠️ 빈 메시지라 전송 불가");
+      return;
+    }
+
+    if (!myId) {
+      console.error("❌ myId 없음 (로그인 정보 로드 실패)");
+      return;
+    }
 
     const nowIso = new Date().toISOString();
     const optimisticId = Date.now() + Math.floor(Math.random() * 1000);
@@ -553,7 +564,7 @@ export default function ChatRoomScreen() {
       sentAtMs: Date.now(),
     });
 
-    // ✅ 여기서 바로 store에 들어가야 화면에 보여야 정상
+    console.log("➕ Optimistic 메시지 추가:", optimistic); // ✅ 로그 추가
     addMessage(roomIdOrNull, optimistic);
     updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
     setText("");
@@ -574,6 +585,8 @@ export default function ChatRoomScreen() {
     safeScrollToBottom,
     sendContent,
   ]);
+
+  // ... (나머지 코드는 동일) ...
 
   const handlePressAvatar = useCallback(
     async (senderId: number) => {
@@ -706,7 +719,13 @@ export default function ChatRoomScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#fafafa" }}
+      style={
+        {
+          flex: 1,
+          backgroundColor: "#fafafa",
+          ...(Platform.OS === "web" ? { height: "100vh" } : {}),
+        } as any
+      }
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
       enabled={Platform.OS !== "web"}
@@ -734,7 +753,7 @@ export default function ChatRoomScreen() {
           contentContainerStyle={{
             padding: 12,
             paddingBottom: inputBarH + insets.bottom + 12,
-            flexGrow: 1, // ✅ 웹에서 높이 0 되는 케이스 완화
+            flexGrow: 1,
           }}
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
           onScrollToIndexFailed={onScrollToIndexFailed}
@@ -750,7 +769,6 @@ export default function ChatRoomScreen() {
         onHeight={setInputBarH}
       />
 
-      {/* ✅ 검색 모달 */}
       <Modal
         visible={searchOpen}
         transparent
@@ -840,7 +858,6 @@ export default function ChatRoomScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* ✅ 프로필 모달 */}
       <Modal
         visible={profileModalVisible}
         transparent
@@ -859,7 +876,9 @@ export default function ChatRoomScreen() {
                       <View style={chatRoomModalStyles.bgContainer}>
                         {selectedProfile.backgroundPhotoUrl ? (
                           <Image
-                            source={{ uri: selectedProfile.backgroundPhotoUrl }}
+                            source={{
+                              uri: selectedProfile.backgroundPhotoUrl,
+                            }}
                             style={chatRoomModalStyles.bgImage}
                           />
                         ) : (
@@ -883,7 +902,9 @@ export default function ChatRoomScreen() {
                         <View style={chatRoomModalStyles.avatarContainer}>
                           {selectedProfile.profilePhotoUrl ? (
                             <Image
-                              source={{ uri: selectedProfile.profilePhotoUrl }}
+                              source={{
+                                uri: selectedProfile.profilePhotoUrl,
+                              }}
                               style={chatRoomModalStyles.avatar}
                             />
                           ) : (

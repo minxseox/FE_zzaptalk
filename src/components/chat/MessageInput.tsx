@@ -1,3 +1,4 @@
+// MessageInput.tsx
 import React from "react";
 import {
   Pressable,
@@ -25,16 +26,21 @@ export default function MessageInput({
   inputRef,
   onHeight,
 }: Props) {
-  // ✅ 웹에서 Enter키 처리 (Shift+Enter는 줄바꿈, 그냥 Enter는 전송)
   const handleKeyPress = (
     e: NativeSyntheticEvent<TextInputKeyPressEventData>
   ) => {
-    if (Platform.OS === "web") {
-      // 🚨 수정 포인트: (e.nativeEvent as any).shiftKey 로 타입 우회
-      if (e.nativeEvent.key === "Enter" && !(e.nativeEvent as any).shiftKey) {
-        e.preventDefault(); // 줄바꿈 방지
-        onSend();
-      }
+    if (Platform.OS !== "web") return;
+
+    const ne: any = e.nativeEvent; // ✅ shiftKey / preventDefault 우회
+    if (ne?.key === "Enter" && !ne?.shiftKey) {
+      // ✅ 줄바꿈 방지: preventDefault는 web에서만 있을 수도 있어서 optional 처리
+      ne.preventDefault?.();
+      (e as any).preventDefault?.();
+
+      // ✅ 혹시 이미 \n 이 들어가버린 경우 제거(안전장치)
+      setText(text.replace(/\n$/, ""));
+
+      onSend();
     }
   };
 
@@ -56,16 +62,14 @@ export default function MessageInput({
           placeholder="메세지 입력"
           value={text}
           onChangeText={setText}
-          style={[chatRoomStyles.input, { maxHeight: 100 }]} // 길어지면 스크롤
-          // ✅ 채팅 핵심 설정 (여러 줄 입력)
-          multiline={true}
-          // ✅ 웹: Enter 키 감지
+          style={[chatRoomStyles.input, { maxHeight: 100 }]}
+          multiline
           onKeyPress={handleKeyPress}
-          // ✅ 모바일: 키보드 '전송' 버튼 눌렀을 때
           onSubmitEditing={Platform.OS !== "web" ? onSend : undefined}
-          // ✅ Android 텍스트 정렬 이슈 방지
+          blurOnSubmit={false}
           textAlignVertical="center"
         />
+
         <Pressable
           style={[
             chatRoomStyles.sendFab,
