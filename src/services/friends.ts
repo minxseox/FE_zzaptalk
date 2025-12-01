@@ -18,7 +18,7 @@ export type BlockType = "MESSAGE_ONLY" | "MESSAGE_AND_PROFILE" | "NONE";
  */
 export async function getFriendList(): Promise<FriendListResponseDto> {
   try {
-    const res = await api.get<FriendListResponseDto>("/v1/friends");
+    const res = await api.get<FriendListResponseDto>("api/v1/friends");
     return res.data;
   } catch (err) {
     const e = err as AxiosError;
@@ -32,7 +32,7 @@ export async function getFriendList(): Promise<FriendListResponseDto> {
  */
 export async function addFriend(payload: AddFriendPayload): Promise<string> {
   try {
-    const res = await api.post<string>("/v1/friends", payload, {
+    const res = await api.post<string>("api/v1/friends", payload, {
       responseType: "text",
     });
     return typeof res.data === "string" ? res.data : String(res.data);
@@ -50,7 +50,7 @@ export async function deleteFriend(friendId: number): Promise<void> {
     throw new ApiError("삭제할 친구 ID가 없습니다.", 400, null);
   }
   try {
-    await api.delete(`/v1/friends/${friendId}`);
+    await api.delete(`api/v1/friends/${friendId}`);
   } catch (err) {
     const e = err as AxiosError;
     throw new ApiError(e.message, e.response?.status ?? 500, e.response?.data);
@@ -64,7 +64,7 @@ export async function searchFriends(
   keyword: string
 ): Promise<FriendListResponseDto> {
   try {
-    const res = await api.get<FriendListResponseDto>("/v1/friends/search", {
+    const res = await api.get<FriendListResponseDto>("api/v1/friends/search", {
       params: { keyword },
     });
     return res.data;
@@ -79,7 +79,7 @@ export async function searchFriends(
  */
 export async function getFriendProfile(friendId: number): Promise<any> {
   try {
-    const res = await api.get(`/v1/friends/${friendId}/profile`);
+    const res = await api.get(`api/v1/friends/${friendId}/profile`);
     return res.data;
   } catch (err) {
     const e = err as AxiosError;
@@ -95,7 +95,7 @@ export async function updateFriendSetting(payload: {
   isFavorite: boolean;
 }): Promise<void> {
   try {
-    await api.put("/v1/friends", payload);
+    await api.put("api/v1/friends", payload);
   } catch (err) {
     const e = err as AxiosError;
     throw new ApiError(e.message, e.response?.status ?? 500, e.response?.data);
@@ -107,7 +107,7 @@ export async function updateFriendSetting(payload: {
  */
 export async function syncContacts(contacts: any[]): Promise<void> {
   try {
-    await api.post("/v1/friends/sync-contacts", { contacts });
+    await api.post("api/v1/friends/sync-contacts", { contacts });
   } catch (err) {
     const e = err as AxiosError;
     throw new ApiError(e.message, e.response?.status ?? 500, e.response?.data);
@@ -122,7 +122,7 @@ export async function createFriendGroup(
 ): Promise<FriendGroupResponseDto> {
   try {
     const res = await api.post<FriendGroupResponseDto>(
-      "/v1/friends/groups",
+      "api/v1/friends/groups",
       body
     );
     return res.data;
@@ -135,7 +135,9 @@ export async function createFriendGroup(
 /** 그룹 목록 조회: GET /api/v1/friends/groups */
 export async function getFriendGroups(): Promise<FriendGroupResponseDto[]> {
   try {
-    const res = await api.get<FriendGroupResponseDto[]>("/v1/friends/groups");
+    const res = await api.get<FriendGroupResponseDto[]>(
+      "api/v1/friends/groups"
+    );
     return res.data;
   } catch (err) {
     const e = err as AxiosError;
@@ -148,7 +150,7 @@ export async function addFriendToGroup(
   body: AddFriendToGroupRequestDto
 ): Promise<void> {
   try {
-    await api.post("/v1/friends/groups/members", body);
+    await api.post("api/v1/friends/groups/members", body);
   } catch (err) {
     const e = err as AxiosError;
     throw new ApiError(e.message, e.response?.status ?? 500, e.response?.data);
@@ -162,7 +164,7 @@ export async function removeFriendFromGroup(
 ): Promise<string | undefined> {
   try {
     const res = await api.delete<string>(
-      `/v1/friends/groups/${groupId}/members/${friendshipId}`
+      `api/v1/friends/groups/${groupId}/members/${friendshipId}`
     );
     return res.data;
   } catch (err) {
@@ -176,7 +178,7 @@ export async function deleteFriendGroup(
   groupId: number
 ): Promise<string | undefined> {
   try {
-    const res = await api.delete<string>(`/v1/friends/groups/${groupId}`);
+    const res = await api.delete<string>(`api/v1/friends/groups/${groupId}`);
     return res.data;
   } catch (err) {
     const e = err as AxiosError;
@@ -195,7 +197,7 @@ export async function blockFriend(
   blockType: BlockType
 ): Promise<void> {
   try {
-    await api.post("/v1/friends/block", {
+    await api.post("api/v1/friends/block", {
       blockedUserId,
       blockType,
     });
@@ -213,7 +215,7 @@ export async function getBlockedFriends(): Promise<any[]> {
   try {
     // 응답 DTO가 명세되어 있지 않아 any[]로 처리했습니다.
     // 추후 차단 목록 데이터 구조가 확정되면 타입을 변경하세요.
-    const res = await api.get<any[]>("/v1/friends/block");
+    const res = await api.get<any[]>("api/v1/friends/block");
     return res.data;
   } catch (err) {
     const e = err as AxiosError;
@@ -230,7 +232,7 @@ export async function updateBlockFriend(
   blockType: BlockType
 ): Promise<void> {
   try {
-    await api.put("/v1/friends/block", {
+    await api.put("api/v1/friends/block", {
       blockedUserId,
       blockType,
     });
