@@ -113,17 +113,37 @@ function formatTimeSafe(isoString: string): string {
   }
 }
 
+/** ✅ REST/WS 메시지 정규화: messageId도 숫자화(문자열 id 대비) */
 function normalizeRestMessage(m: ChatMessageResponse): ChatMessageResponse {
   const senderIdNum = toNumberSafe((m as any).senderId) ?? 0;
   const roomIdNum = toNumberSafe((m as any).roomId) ?? (m as any).roomId ?? 0;
+  const messageIdNum =
+    toNumberSafe((m as any).messageId) ??
+    (m as any).messageId ??
+    Date.now() + Math.floor(Math.random() * 1000);
 
   return {
     ...m,
+    messageId: messageIdNum as any,
     roomId: roomIdNum,
     senderId: senderIdNum,
     createdAt: toIsoSafe((m as any).createdAt),
     sentAt: toIsoSafe((m as any).sentAt ?? (m as any).createdAt),
   };
+}
+
+/** ✅ 서버리스트(setMessages)가 optimistic를 덮어쓰지 않게 merge + dedupe + sort */
+function mergeDedupeSort(
+  a: ChatMessageResponse[],
+  b: ChatMessageResponse[]
+): ChatMessageResponse[] {
+  const map = new Map<string, ChatMessageResponse>();
+  for (const m of [...a, ...b]) {
+    map.set(String((m as any).messageId), m);
+  }
+  return Array.from(map.values()).sort(
+    (x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt)
+  );
 }
 
 function sameDay(aIso?: string | null, bIso?: string | null) {
@@ -270,10 +290,13 @@ export default function ChatRoomScreen() {
         .map(normalizeRestMessage)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 
-      setMessages(roomId, sorted);
+      // ✅ 덮어쓰기 금지: 현재 store(optimistic 포함)와 merge
+      const cur = useChatStore.getState().messagesByRoom[roomId] ?? EMPTY;
+      const merged = mergeDedupeSort(cur, sorted);
+      setMessages(roomId, merged);
 
-      if (sorted.length > 0) {
-        const last = sorted[sorted.length - 1];
+      if (merged.length > 0) {
+        const last = merged[merged.length - 1];
         updateRoomLastMessage(roomId, last.content, last.createdAt, true);
       }
     } catch (e: any) {
@@ -292,10 +315,13 @@ export default function ChatRoomScreen() {
         .map(normalizeRestMessage)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 
-      setMessages(roomId, sorted);
+      // ✅ 덮어쓰기 금지: 현재 store(optimistic 포함)와 merge
+      const cur = useChatStore.getState().messagesByRoom[roomId] ?? EMPTY;
+      const merged = mergeDedupeSort(cur, sorted);
+      setMessages(roomId, merged);
 
-      if (sorted.length > 0) {
-        const last = sorted[sorted.length - 1];
+      if (merged.length > 0) {
+        const last = merged[merged.length - 1];
         updateRoomLastMessage(roomId, last.content, last.createdAt, true);
       }
     } catch (e: any) {
@@ -383,7 +409,6 @@ export default function ChatRoomScreen() {
         for (const [optId, info] of pendingOptimisticRef.current.entries()) {
           if (info.content !== normalized.content) continue;
 
-          // 서버 시간/지금 시간 둘 다 고려해서 근접한 optimistic 하나 선택
           const diff = Math.min(
             Math.abs(baseMs - info.sentAtMs),
             Math.abs(now - info.sentAtMs)
@@ -405,9 +430,6 @@ export default function ChatRoomScreen() {
       idSetRef.current.add(key);
       addMsg(roomId, normalized);
       updateLast(roomId, normalized.content, normalized.createdAt, true);
-
-      // ✅ 4) 혹시 남아있던 sending 상태 제거(서버 메시지가 왔으니 성공으로 간주)
-      // (서버 messageId는 optimisticId와 다르므로, 여기선 굳이 sendStatus 건드리지 않아도 됨)
     });
 
     return () => unsub?.();
@@ -442,14 +464,21 @@ export default function ChatRoomScreen() {
       try {
         if (sendChatMessageRaw) await sendCompat(roomId, myId, content);
 
-        // ✅ 전송 성공: 여기서 전체 재조회(syncMessages) 하지 않음
-        // 소켓에서 진짜 메시지가 돌아오면 optimistic 교체로 정리됨.
+        // ✅ 전송 성공
         markStatus(msgId, undefined);
+
+        // ✅ 서버 echo가 안 오는 환경 대비: 잠깐 기다렸다가,
+        // 아직 pending(=교체 안 됨)이면 1회 sync로 보정
+        setTimeout(() => {
+          if (pendingOptimisticRef.current.has(msgId)) {
+            syncMessages();
+          }
+        }, 1200);
       } catch {
         markStatus(msgId, "failed");
       }
     },
-    [myId, markStatus, roomId]
+    [myId, markStatus, roomId, syncMessages]
   );
 
   const openFailActionSheet = useCallback(
@@ -484,11 +513,14 @@ export default function ChatRoomScreen() {
   );
 
   const onSend = useCallback(async () => {
+    // ✅ 초기 로딩 중 전송은 덮어쓰기 타이밍 사고가 나서 방지
+    if (initialLoading) return;
+
     const t = text.trim();
     if (!t || !myId) return;
 
     const nowIso = new Date().toISOString();
-    const optimisticId = Date.now() + Math.floor(Math.random() * 1000); // ✅ 충돌 약간 줄임
+    const optimisticId = Date.now() + Math.floor(Math.random() * 1000);
 
     const optimistic: ChatMessageResponse = {
       messageId: optimisticId,
@@ -501,7 +533,6 @@ export default function ChatRoomScreen() {
       type: "TEXT",
     };
 
-    // ✅ optimistic 기록(나중에 소켓 오면 교체)
     pendingOptimisticRef.current.set(optimisticId, {
       content: t,
       sentAtMs: Date.now(),
@@ -518,6 +549,7 @@ export default function ChatRoomScreen() {
     await sendContent(optimisticId, t);
     inputRef.current?.focus();
   }, [
+    initialLoading,
     text,
     myId,
     roomId,
