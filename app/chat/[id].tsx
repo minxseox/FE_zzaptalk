@@ -1,7 +1,8 @@
+// app/chat/[id].tsx (또는 ChatRoomScreen 컴포넌트)
 import React, {
   useCallback,
   useEffect,
-  useLayoutEffect, // ✅ [수정] 깜빡임 없는 스크롤을 위해 추가
+  useLayoutEffect, // ✅ [필수] Web Flash 방지
   useMemo,
   useRef,
   useState,
@@ -114,7 +115,6 @@ function formatTimeSafe(isoString: string): string {
   }
 }
 
-/** ✅ REST/WS 메시지 정규화: messageId도 숫자화(문자열 id 대비) */
 function normalizeRestMessage(m: ChatMessageResponse): ChatMessageResponse {
   const senderIdNum = toNumberSafe((m as any).senderId) ?? 0;
   const roomIdNum = toNumberSafe((m as any).roomId) ?? (m as any).roomId ?? 0;
@@ -133,7 +133,6 @@ function normalizeRestMessage(m: ChatMessageResponse): ChatMessageResponse {
   };
 }
 
-/** ✅ 서버리스트(setMessages)가 optimistic를 덮어쓰지 않게 merge + dedupe + sort */
 function mergeDedupeSort(
   a: ChatMessageResponse[],
   b: ChatMessageResponse[]
@@ -170,7 +169,6 @@ async function getMyId(): Promise<number | null> {
   }
 }
 
-/** ✅ arity(length) 의존 제거: 항상 (roomId, myId, content)로 호출 */
 async function sendCompat(roomId: number, myId: number, content: string) {
   if (!sendChatMessageRaw) return;
   return sendChatMessageRaw(roomId, myId, content);
@@ -217,7 +215,6 @@ export default function ChatRoomScreen() {
 
   const [sendStatus, setSendStatus] = useState<SendStatusMap>({});
 
-  // ✅ 채팅 검색 상태
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<TextInput | null>(null);
@@ -225,17 +222,13 @@ export default function ChatRoomScreen() {
   const prevLenRef = useRef(0);
   const scrollingRef = useRef(false);
 
-  /** ✅ dedupe용: 현재 화면에 존재하는 messageId들 */
   const idSetRef = useRef<Set<string>>(new Set());
-
-  /** ✅ optimistic 교체용: 내가 보낸 임시 메시지 기록 */
   const pendingOptimisticRef = useRef<
     Map<number, { content: string; sentAtMs: number }>
   >(new Map());
 
   useEffect(() => setMounted(true), []);
 
-  // messages가 바뀔 때마다 id set 갱신
   useEffect(() => {
     idSetRef.current = new Set(messages.map((m) => String(m.messageId)));
   }, [messages]);
@@ -249,7 +242,6 @@ export default function ChatRoomScreen() {
     });
   }, []);
 
-  // ✅ 프로필 모달
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -291,7 +283,6 @@ export default function ChatRoomScreen() {
         .map(normalizeRestMessage)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 
-      // ✅ 덮어쓰기 금지: 현재 store(optimistic 포함)와 merge
       const cur = useChatStore.getState().messagesByRoom[roomId] ?? EMPTY;
       const merged = mergeDedupeSort(cur, sorted);
       setMessages(roomId, merged);
@@ -316,7 +307,6 @@ export default function ChatRoomScreen() {
         .map(normalizeRestMessage)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 
-      // ✅ 덮어쓰기 금지: 현재 store(optimistic 포함)와 merge
       const cur = useChatStore.getState().messagesByRoom[roomId] ?? EMPTY;
       const merged = mergeDedupeSort(cur, sorted);
       setMessages(roomId, merged);
@@ -336,10 +326,9 @@ export default function ChatRoomScreen() {
     if (!navReady) return;
     initialLoad();
     resetUnreadCount(roomId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navReady, roomId]);
 
-  // ✅ [수정] Web Flash 방지 및 스크롤 안정화를 위해 useLayoutEffect 사용
+  // ✅ [수정] useLayoutEffect로 스크롤 깜빡임 제거
   useLayoutEffect(() => {
     if (!mounted) return;
     if (messages.length > prevLenRef.current) {
@@ -348,7 +337,7 @@ export default function ChatRoomScreen() {
     prevLenRef.current = messages.length;
   }, [messages.length, mounted, safeScrollToBottom]);
 
-  // ✅ [추가] Web UX: 로딩 완료 후 자동 포커스 (마우스 클릭 불필요하게)
+  // ✅ [수정] 웹 입장 시 자동 포커스
   useEffect(() => {
     if (!initialLoading && Platform.OS === "web") {
       setTimeout(() => {
@@ -357,7 +346,6 @@ export default function ChatRoomScreen() {
     }
   }, [initialLoading]);
 
-  // ✅ status map 정리
   useEffect(() => {
     const ids = new Set(messages.map((m) => String(m.messageId)));
     setSendStatus((prev) => {
@@ -371,7 +359,6 @@ export default function ChatRoomScreen() {
     });
   }, [messages]);
 
-  /** ✅ 현재 store 기준으로 메시지 삭제(클로저 꼬임 방지) */
   const removeMessageByIdNow = useCallback(
     (msgId: number) => {
       const st = useChatStore.getState();
@@ -381,20 +368,17 @@ export default function ChatRoomScreen() {
         cur.filter((m) => String(m.messageId) !== String(msgId))
       );
 
-      // sendStatus 정리
       setSendStatus((prev) => {
         const next = { ...prev };
         delete next[String(msgId)];
         return next;
       });
 
-      // dedupe set 정리
       idSetRef.current.delete(String(msgId));
     },
     [roomId]
   );
 
-  // ✅ 소켓 구독 (dedupe + optimistic 교체)
   useEffect(() => {
     if (!subscribeRoom) return;
 
@@ -405,10 +389,8 @@ export default function ChatRoomScreen() {
       const normalized = normalizeRestMessage(m);
       const key = String(normalized.messageId);
 
-      // ✅ 1) messageId 기준 중복 방지
       if (idSetRef.current.has(key)) return;
 
-      // ✅ 2) 내 메시지면 optimistic(임시) 교체 시도
       if (myId != null && normalized.senderId === myId) {
         const now = Date.now();
         const serverAt = Date.parse(normalized.createdAt);
@@ -437,7 +419,6 @@ export default function ChatRoomScreen() {
         }
       }
 
-      // ✅ 3) 서버 메시지 추가
       idSetRef.current.add(key);
       addMsg(roomId, normalized);
       updateLast(roomId, normalized.content, normalized.createdAt, true);
@@ -459,7 +440,6 @@ export default function ChatRoomScreen() {
     });
   }, []);
 
-  /** ✅ 실패 액션시트에서 “삭제”는 현재 store 기준으로 삭제 */
   const deleteLocalMessage = useCallback(
     (msgId: number) => {
       removeMessageByIdNow(msgId);
@@ -474,12 +454,8 @@ export default function ChatRoomScreen() {
       markStatus(msgId, "sending");
       try {
         if (sendChatMessageRaw) await sendCompat(roomId, myId, content);
-
-        // ✅ 전송 성공
         markStatus(msgId, undefined);
 
-        // ✅ 서버 echo가 안 오는 환경 대비: 잠깐 기다렸다가,
-        // 아직 pending(=교체 안 됨)이면 1회 sync로 보정
         setTimeout(() => {
           if (pendingOptimisticRef.current.has(msgId)) {
             syncMessages();
@@ -524,7 +500,6 @@ export default function ChatRoomScreen() {
   );
 
   const onSend = useCallback(async () => {
-    // ✅ 초기 로딩 중 전송은 덮어쓰기 타이밍 사고가 나서 방지
     if (initialLoading) return;
 
     const t = text.trim();
@@ -591,7 +566,6 @@ export default function ChatRoomScreen() {
     [myId]
   );
 
-  // ✅ 검색 결과 계산 (메시지 내용 기준)
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
@@ -705,7 +679,7 @@ export default function ChatRoomScreen() {
       style={{ flex: 1, backgroundColor: "#fafafa" }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
-      // ✅ [수정] 웹에서는 KeyboardAvoidingView 기능 끄기 (레이아웃 충돌 방지)
+      // ✅ [수정] 웹에서는 KeyboardAvoidingView 기능 끄기
       enabled={Platform.OS !== "web"}
     >
       <ChatHeader

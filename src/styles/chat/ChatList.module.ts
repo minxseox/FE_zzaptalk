@@ -34,6 +34,12 @@ export default StyleSheet.create({
     alignItems: "center",
     zIndex: -1, // 버튼들보다 뒤에 위치하여 터치 방해 방지
   },
+  emptyText: {
+    marginTop: 12,
+    color: "#999",
+    fontSize: 15,
+    textAlign: "center",
+  },
 
   headerLeft: {
     width: 40,

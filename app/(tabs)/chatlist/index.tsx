@@ -1,5 +1,5 @@
 // app/(tabs)/chatlist/index.tsx
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -24,13 +24,24 @@ import {
 import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
+// ✅ [Tip] src/types/chat.ts의 ChatRoom 타입에 lastMessage?: string; 을 추가하면 더 좋습니다.
+// 이 파일 내에서만 임시로 타입을 확장해서 쓰고 싶다면 아래처럼 정의합니다.
+interface ChatRoomItem {
+  roomId: number;
+  roomName: string;
+  lastMessage?: string;
+  [key: string]: any; // 다른 필드 허용
+}
+
 export default function ChatListScreen() {
   const router = useRouter();
 
-  // ✅ Store 상태 구독
+  // ✅ [수정] Zustand: Hook 패턴으로 상태와 액션 구독 (반응성 확보)
   const rooms = useChatListStore((state) => state.rooms);
+  const setRoomsFromServer = useChatListStore(
+    (state) => state.setRoomsFromServer
+  );
 
-  // ✅ 초기 로딩 상태는 true로 고정 (Hydration 안전)
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -40,27 +51,25 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ 채팅방 목록 로딩 함수 (Zustand setter는 getState로 고정 참조 사용)
-  const fetchRooms = useCallback(async (isRefresh = false) => {
-    try {
-      // isRefresh가 아닐 때만 로딩 상태 표시
-      if (!isRefresh) {
-        setLoading(true);
+  // ✅ [수정] getState() 대신 Hook으로 가져온 setRoomsFromServer 사용
+  const fetchRooms = useCallback(
+    async (isRefresh = false) => {
+      try {
+        if (!isRefresh) setLoading(true);
+
+        const data = await getChatRoomList();
+        setRoomsFromServer(data);
+      } catch (e) {
+        console.error("[ChatList] 채팅방 목록 조회 실패:", e);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
+    },
+    [setRoomsFromServer]
+  ); // 의존성 추가
 
-      const data = await getChatRoomList();
-
-      const setRoomsFromServer = useChatListStore.getState().setRoomsFromServer;
-      setRoomsFromServer(data);
-    } catch (e) {
-      console.error("[ChatList] 채팅방 목록 조회 실패:", e);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  // ✅ 포커스 시 갱신
+  // 포커스 시 갱신
   useFocusEffect(
     useCallback(() => {
       fetchRooms();
@@ -98,9 +107,11 @@ export default function ChatListScreen() {
     try {
       setCreating(true);
       const room = await createOrGetSingleChatRoom(idNum);
-      const r = room as any;
-      const roomId = r.roomId ?? r.id;
-      const roomName = r.roomName ?? r.title ?? r.name ?? "채팅방";
+
+      // 타입 안전하게 처리
+      const r = room as ChatRoomItem;
+      const roomId = r.roomId;
+      const roomName = r.roomName || "채팅방";
 
       if (!roomId) {
         Alert.alert("오류", "생성된 채팅방 ID를 찾을 수 없어요.");
@@ -110,7 +121,7 @@ export default function ChatListScreen() {
       setShowCreate(false);
       setPartnerId("");
 
-      // 방 생성 후 목록 갱신
+      // 방 생성 후 목록 갱신 및 이동
       await fetchRooms();
       goRoom(roomId, roomName);
     } catch (err: any) {
@@ -127,7 +138,6 @@ export default function ChatListScreen() {
 
   return (
     <View style={styles.safeArea}>
-      {/* 헤더 */}
       <View style={styles.header}>
         <View style={styles.headerTitleWrapper}>
           <Text style={styles.headerTitle}>채팅</Text>
@@ -171,42 +181,46 @@ export default function ChatListScreen() {
               }}
             >
               <Ionicons name="chatbubbles-outline" size={48} color="#ccc" />
-              <Text style={{ marginTop: 12, color: "#999", fontSize: 15 }}>
-                참여 중인 채팅방이 없어요.
-              </Text>
+              <Text style={styles.emptyText}>참여 중인 채팅방이 없어요.</Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <Pressable
-              style={styles.roomRow}
-              onPress={() => goRoom(item.roomId, item.roomName)}
-            >
-              <View style={styles.roomAvatar}>
-                <Text style={styles.roomAvatarInitial}>
-                  {item.roomName?.charAt(0) ?? "?"}
-                </Text>
-              </View>
-
-              <View style={{ flex: 1, justifyContent: "center" }}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    justifyContent: "space-between",
-                    marginBottom: 2,
-                  }}
-                >
-                  <Text style={styles.roomName} numberOfLines={1}>
-                    {item.roomName || "알 수 없는 채팅방"}
+          renderItem={({ item }) => {
+            // ✅ [수정] as any 제거 및 안전한 접근
+            const roomItem = item as ChatRoomItem;
+            return (
+              <Pressable
+                style={styles.roomRow}
+                onPress={() => goRoom(roomItem.roomId, roomItem.roomName)}
+              >
+                <View style={styles.roomAvatar}>
+                  <Text style={styles.roomAvatarInitial}>
+                    {roomItem.roomName?.charAt(0) ?? "?"}
                   </Text>
                 </View>
 
-                {/* 마지막 메시지 표시 */}
-                <Text style={{ fontSize: 13, color: "#888" }} numberOfLines={1}>
-                  {(item as any).lastMessage || "대화 내용이 없습니다."}
-                </Text>
-              </View>
-            </Pressable>
-          )}
+                <View style={{ flex: 1, justifyContent: "center" }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      marginBottom: 2,
+                    }}
+                  >
+                    <Text style={styles.roomName} numberOfLines={1}>
+                      {roomItem.roomName || "알 수 없는 채팅방"}
+                    </Text>
+                  </View>
+
+                  <Text
+                    style={{ fontSize: 13, color: "#888" }}
+                    numberOfLines={1}
+                  >
+                    {roomItem.lastMessage || "대화 내용이 없습니다."}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          }}
         />
       )}
 
@@ -220,6 +234,8 @@ export default function ChatListScreen() {
         <KeyboardAvoidingView
           style={styles.sheetBackdrop}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
+          // 웹에서는 모달 내부 인풋 포커스 이슈가 적어서 enabled 둬도 되지만,
+          // 레이아웃이 튄다면 enabled={Platform.OS !== 'web'} 추가
         >
           <Pressable
             style={styles.sheetBackdropTouchable}
