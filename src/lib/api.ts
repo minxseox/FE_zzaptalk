@@ -16,27 +16,29 @@ export class ApiError extends Error {
 }
 
 /* ===============================
- * BASE URL 설정 (최종 해결 버전)
+ * BASE URL 설정 (배포 대응 수정 버전)
  *
- * 1. 로컬 개발 시: http://localhost:8080/api (강제 지정)
- * 2. 도커/배포 시: /api (Nginx 프록시 사용)
+ * 1. .env 설정이 있으면 최우선 (EXPO_PUBLIC_API_BASE)
+ * 2. 개발 환경: localhost:8080/api
+ * 3. 배포 환경: https://api.zzaptalk.com/api (여기가 핵심!)
  * =============================== */
 const getBaseUrl = () => {
-  // 1. .env 에서 EXPO_PUBLIC_API_BASE 가 오면 최우선 사용 (유연성 유지)
+  // 1. .env 에서 EXPO_PUBLIC_API_BASE 가 오면 최우선 사용
   const envBase = process.env.EXPO_PUBLIC_API_BASE;
   if (envBase) {
+    // 혹시 모를 끝부분 슬래시 제거 후 반환
     return envBase.replace(/\/+$/, "");
   }
 
-  // 2. 개발 환경 (내 컴퓨터에서 npm start / npx expo start 할 때)
-  //    ❗중요: 백엔드 포트가 8080이 아니면 숫자를 변경하세요!
+  // 2. 개발 환경 (npm start / npx expo start)
   if (process.env.NODE_ENV === "development") {
     return "http://localhost:8080/api";
   }
 
-  // 3. 기본값: /api
-  //    - 도커/배포 환경에서는 NGINX가 처리하므로 상대 경로 사용
-  return "/api";
+  // 3. 배포(Production) 환경 기본값
+  // ❌ 수정 전: return "/api"; (이건 같은 도메인일 때만 유효)
+  // ✅ 수정 후: 명시적으로 배포 서버 도메인 + /api 포함
+  return "https://api.zzaptalk.com/api";
 };
 
 // ✅ 최종 BASE URL
