@@ -756,6 +756,7 @@ export default function ChatRoomScreen() {
             padding: 12,
             paddingBottom: inputBarH + insets.bottom + 12,
             flexGrow: 1,
+            justifyContent: "flex-end",
           }}
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
           onScrollToIndexFailed={onScrollToIndexFailed}
