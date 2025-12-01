@@ -31,7 +31,7 @@ export type SignupPayload = {
 /* =========================
  * 회원가입 (인증 불필요)
  * POST /api/v1/users/signup
- * ========================= */
+ * ========================= */ ///
 export async function signup(payload: SignupPayload): Promise<void> {
   const phone = (payload.phoneNum || "").replace(/\D/g, "");
   const pwd = (payload.pwd || "").trim();
