@@ -18,7 +18,7 @@ function resolveWsUrl(): string {
   }
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  WS_URL = `${protocol}//${window.location.host}/ws/websocket`;
+  WS_URL = `${protocol}//${window.location.host}/ws`;
   console.log("[Socket] WS_URL:", WS_URL);
   return WS_URL;
 }
