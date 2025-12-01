@@ -1,4 +1,4 @@
-import React from "react";
+import React, { memo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { chatRoomStyles } from "../../styles/chat/ChatRoom.module";
@@ -17,14 +17,13 @@ type Props = {
   // time
   timeLabel?: string;
   showTime: boolean;
-  failed?: boolean;
-  onPressFail?: () => void;
+
   // status (local)
   status?: "sent" | "sending" | "failed";
   onPressFail?: () => void;
 };
 
-export default function MessageBubble({
+function MessageBubble({
   mine,
   content,
   senderName,
@@ -84,6 +83,8 @@ export default function MessageBubble({
             style={
               mine ? chatRoomStyles.msgTextMine : chatRoomStyles.msgTextOther
             }
+            // ✅ 텍스트 복사 허용 (UX 필수)
+            selectable={true}
           >
             {content}
           </Text>
@@ -110,3 +111,6 @@ export default function MessageBubble({
     </View>
   );
 }
+
+// ✅ 렌더링 최적화: props가 같으면 다시 그리지 않음
+export default memo(MessageBubble);

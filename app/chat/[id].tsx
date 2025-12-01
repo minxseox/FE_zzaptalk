@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect, // ✅ [수정] 깜빡임 없는 스크롤을 위해 추가
   useMemo,
   useRef,
   useState,
@@ -338,13 +339,23 @@ export default function ChatRoomScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navReady, roomId]);
 
-  useEffect(() => {
+  // ✅ [수정] Web Flash 방지 및 스크롤 안정화를 위해 useLayoutEffect 사용
+  useLayoutEffect(() => {
     if (!mounted) return;
     if (messages.length > prevLenRef.current) {
       requestAnimationFrame(() => safeScrollToBottom(true));
     }
     prevLenRef.current = messages.length;
   }, [messages.length, mounted, safeScrollToBottom]);
+
+  // ✅ [추가] Web UX: 로딩 완료 후 자동 포커스 (마우스 클릭 불필요하게)
+  useEffect(() => {
+    if (!initialLoading && Platform.OS === "web") {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    }
+  }, [initialLoading]);
 
   // ✅ status map 정리
   useEffect(() => {
@@ -694,6 +705,8 @@ export default function ChatRoomScreen() {
       style={{ flex: 1, backgroundColor: "#fafafa" }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.select({ ios: 52, android: 0, web: 0 })}
+      // ✅ [수정] 웹에서는 KeyboardAvoidingView 기능 끄기 (레이아웃 충돌 방지)
+      enabled={Platform.OS !== "web"}
     >
       <ChatHeader
         title={headerTitle}
@@ -842,7 +855,9 @@ export default function ChatRoomScreen() {
                       <View style={chatRoomModalStyles.bgContainer}>
                         {selectedProfile.backgroundPhotoUrl ? (
                           <Image
-                            source={{ uri: selectedProfile.backgroundPhotoUrl }}
+                            source={{
+                              uri: selectedProfile.backgroundPhotoUrl,
+                            }}
                             style={chatRoomModalStyles.bgImage}
                           />
                         ) : (
@@ -866,7 +881,9 @@ export default function ChatRoomScreen() {
                         <View style={chatRoomModalStyles.avatarContainer}>
                           {selectedProfile.profilePhotoUrl ? (
                             <Image
-                              source={{ uri: selectedProfile.profilePhotoUrl }}
+                              source={{
+                                uri: selectedProfile.profilePhotoUrl,
+                              }}
                               style={chatRoomModalStyles.avatar}
                             />
                           ) : (
