@@ -2,23 +2,48 @@
 import { Client, IMessage } from "@stomp/stompjs";
 import type { ChatMessageResponse, MessageType } from "../types/chat";
 import { useSocketStore } from "../store/socketStore";
+// ✅ 추가: API 설정에서 BASE URL 가져오기
+import { BASE } from "../lib/api";
 
 /* ==================================
- * WebSocket URL 계산
+ * WebSocket URL 계산 (수정됨)
  * ================================== */
 let WS_URL: string | null = null;
 
 function resolveWsUrl(): string {
   if (WS_URL !== null) return WS_URL;
 
+  // SSR 환경 체크 (Expo/Next.js 등 대비)
   if (typeof window === "undefined") {
     console.warn("[Socket] window undefined → SSR 환경. WS 생략");
     WS_URL = "";
     return WS_URL;
   }
 
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  WS_URL = `${protocol}//${window.location.host}/ws`;
+  // ✅ 수정된 로직: BASE URL(api.ts)을 기준으로 소켓 주소 생성
+  // BASE 예시: "https://api.zzaptalk.com/api" 또는 "http://localhost:8080/api"
+
+  let tempUrl = BASE;
+
+  // 1. 프로토콜 변환 (http -> ws, https -> wss)
+  if (tempUrl.startsWith("https")) {
+    tempUrl = tempUrl.replace("https://", "wss://");
+  } else {
+    tempUrl = tempUrl.replace("http://", "ws://");
+  }
+
+  // 2. 경로 변환 (/api -> /ws)
+  // 정규식으로 끝에 있는 /api를 /ws로 교체하거나, 단순히 문자열 치환
+  if (tempUrl.endsWith("/api")) {
+    tempUrl = tempUrl.slice(0, -4); // 끝에 /api 제거
+  }
+
+  // 끝에 /ws 붙이기 (중복 방지)
+  if (!tempUrl.endsWith("/ws")) {
+    tempUrl += "/ws";
+  }
+
+  WS_URL = tempUrl;
   console.log("[Socket] WS_URL:", WS_URL);
   return WS_URL;
 }
