@@ -50,7 +50,7 @@ export async function signup(payload: SignupPayload): Promise<void> {
   const body = { phoneNum: phone, pwd, name, rrn };
 
   // 인증 불필요 엔드포인트이므로 skipAuth 지정
-  await post("/v1/users/signup", body, { skipAuth: true });
+  await post("api/v1/users/signup", body, { skipAuth: true });
 }
 
 /* =========================
@@ -83,7 +83,7 @@ export async function login(payload: LoginPayload): Promise<string> {
   else body.zzapID = zzapID;
 
   // 인증 불필요 엔드포인트 → skipAuth:true
-  const res = (await post<AuthLoginResponse>("/v1/users/login", body, {
+  const res = (await post<AuthLoginResponse>("api/v1/users/login", body, {
     skipAuth: true,
   })) as AuthLoginResponse;
 
@@ -133,7 +133,7 @@ export async function refreshAccessToken(
 ): Promise<string> {
   const body = { refreshToken };
 
-  const res = (await post<AuthLoginResponse>("/v1/users/refresh", body, {
+  const res = (await post<AuthLoginResponse>("api/v1/users/refresh", body, {
     skipAuth: true, // 🔥 Authorization 헤더 없이 호출
   })) as AuthLoginResponse;
 
@@ -179,5 +179,5 @@ export async function refreshAccessToken(
 export async function logout(): Promise<void> {
   // 서버에서 Access/Refresh 처리(블랙리스트, 쿠키 삭제 등)를 수행
   // 클라이언트 쪽 토큰 삭제는 호출하는 쪽(Setting 화면)에서 clearAuthTokens로 처리
-  await post("/v1/users/logout", {}); // 옵션 안 주면 기본적으로 인증 붙는 post일 거라 그대로 사용
+  await post("api/v1/users/logout", {}); // 옵션 안 주면 기본적으로 인증 붙는 post일 거라 그대로 사용
 }
