@@ -472,19 +472,26 @@ export default function ChatRoomScreen() {
           // A. 내가 보낸 메시지이며, clientTempId를 가지고 있을 때 (낙관적 메시지 교체 대상)
           if (m.clientTempId) {
             const tempId = m.clientTempId;
+            const st = useChatStore.getState();
+            const curMessages = st.messagesByRoom[roomIdOrNull] ?? EMPTY;
 
             console.log(
               `⚡️ 교체 감지: 임시 ID ${tempId} -> 영구 ID ${permanentKey}`
             );
 
             // 1. 낙관적 메시지(임시 ID) 삭제
-            removeMsg(tempId);
+            st.setMessages(
+              roomIdOrNull,
+              curMessages.filter(
+                (msg) => String(msg.messageId) !== String(tempId)
+              )
+            );
 
             // 2. 영구 ID를 set에 추가
             if (!idSetRef.current.has(permanentKey)) {
               idSetRef.current.add(permanentKey);
               // 3. 영구 메시지 객체로 로컬 목록에 추가 (교체)
-              addMsg(roomIdOrNull, normalized);
+              st.addMessage(roomIdOrNull, normalized);
             }
 
             // 4. 교체 완료. 이 경우는 무조건 여기서 종료.
