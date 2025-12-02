@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   Alert,
   FlatList,
@@ -8,20 +8,19 @@ import {
   TextInput,
   View,
   Keyboard,
-  StyleSheet,
   Image,
   TouchableOpacity,
   TouchableWithoutFeedback,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 
-// ★ 스타일 통합: localStyles를 제거하고 styles 하나만 사용합니다.
+// ★ 스타일 통합
 import styles from "../../../src/styles/friends/Friends.module";
 import modalStyles from "../../../src/styles/friends/FriendAddModal.module";
-import { updateFriendSetting } from "../../../src/services/friends";
 
+// API 서비스
 import {
   getFriendList,
   addFriend,
@@ -30,10 +29,11 @@ import {
   addFriendToGroup,
   deleteFriendGroup,
   blockFriend,
+  updateFriendSetting,
 } from "../../../src/services/friends";
 import { fetchMyProfile } from "../../../src/services/profile";
-import type { FriendListResponseDto } from "../../../src/types/friends";
 import { findOrCreateSingleChatRoom } from "../../../src/services/chat";
+import type { FriendListResponseDto } from "../../../src/types/friends";
 
 type Friend = {
   id: number;
@@ -93,6 +93,7 @@ export default function FriendsScreen() {
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<FriendGroup | null>(null);
 
+  // 친구 목록 불러오기 로직
   const loadFriends = async () => {
     try {
       const data: FriendListResponseDto = await getFriendList();
@@ -153,19 +154,24 @@ export default function FriendsScreen() {
     }
   };
 
-  useEffect(() => {
-    loadFriends();
-  }, []);
+  // ★ 화면 포커스 시(진입 시) 데이터 새로고침 (내 정보 + 친구 목록)
+  useFocusEffect(
+    useCallback(() => {
+      // 1. 내 프로필 가져오기
+      (async () => {
+        try {
+          const me = await fetchMyProfile();
+          setMyName(me.nickname || me.name || "사용자");
+          setMyAvatarUri(me.profilePhotoUrl || null);
+        } catch (e) {
+          console.error("프로필 로드 실패", e);
+        }
+      })();
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const me = await fetchMyProfile();
-        setMyName(me.nickname || me.name || "사용자");
-        setMyAvatarUri(me.profilePhotoUrl || null);
-      } catch (e) {}
-    })();
-  }, []);
+      // 2. 친구 목록 가져오기
+      loadFriends();
+    }, [])
+  );
 
   const handleAddFriend = async () => {
     const raw = identifier.trim();
@@ -191,7 +197,6 @@ export default function FriendsScreen() {
     setMenuVisible(true);
   };
 
-  // 기존 LongPress 호환 (필요 시)
   const handleLongPressFriend = (friend: Friend) => {
     handleOpenFriendMenu(friend);
   };
@@ -202,19 +207,16 @@ export default function FriendsScreen() {
     setMenuVisible(true);
   };
 
-  // ✅ 친구 클릭 시 채팅방으로 이동 (수정됨)
+  // 채팅방 이동
   const handleEnterChat = async (friend: Friend) => {
     try {
-      // 1. 1:1 채팅방 생성 혹은 조회
       const response = await findOrCreateSingleChatRoom(friend.id);
-
-      // 2. 채팅방으로 이동하면서 targetName과 title을 함께 전달
       router.push({
         pathname: "/chat/[id]",
         params: {
-          id: String(response.roomId), // 안전하게 문자열로 변환
-          targetName: friend.name, // ChatRoomScreen에서 이 값을 제목으로 사용
-          title: friend.name, // fallback용 title
+          id: String(response.roomId),
+          targetName: friend.name,
+          title: friend.name,
         },
       });
     } catch (error) {
@@ -270,7 +272,6 @@ export default function FriendsScreen() {
     ]);
   };
 
-  // 차단 기능 연결
   const handleBlockFriend = () => {
     if (!selectedFriend) return;
     setMenuVisible(false);
@@ -285,12 +286,8 @@ export default function FriendsScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              // 1. 차단 API 호출 (타입: MESSAGE_AND_PROFILE)
               await blockFriend(selectedFriend.id, "MESSAGE_AND_PROFILE");
-
-              // 2. 친구 목록 새로고침 (차단된 친구 사라짐)
               await loadFriends();
-
               Alert.alert("알림", "차단되었습니다.");
             } catch (e) {
               console.error(e);
@@ -333,11 +330,10 @@ export default function FriendsScreen() {
     );
   };
 
-  // 검색어 필터링 추가
+  // 검색어 필터링
   const filteredFriends = (() => {
     let result = friends;
 
-    // 1. 탭 필터
     if (filterTab === "FAVORITE") {
       result = result.filter((f) => f.isFavorite);
     } else if (filterTab === "GROUP") {
@@ -345,7 +341,6 @@ export default function FriendsScreen() {
       else result = result.filter((f) => f.groupName === selectedGroupName);
     }
 
-    // 2. 검색어 필터
     if (searchText) {
       result = result.filter((f) =>
         f.name.toLowerCase().includes(searchText.toLowerCase())
@@ -377,15 +372,12 @@ export default function FriendsScreen() {
     }
   };
 
-  // --- 헤더 검색 처리 ---
   const handleSearchToggle = () => {
     if (isSearching) {
-      // 검색 종료
       setIsSearching(false);
       setSearchText("");
       Keyboard.dismiss();
     } else {
-      // 검색 시작
       setIsSearching(true);
     }
   };
@@ -439,6 +431,7 @@ export default function FriendsScreen() {
         </View>
         {/* =========================================== */}
 
+        {/* 내 프로필 영역 */}
         <Pressable
           style={styles.myProfileSection}
           onPress={() => router.push("/profile")}
@@ -449,11 +442,29 @@ export default function FriendsScreen() {
               style={styles.myProfileAvatar}
             />
           ) : (
-            <View style={styles.myProfileAvatar} />
+            // 프로필 사진 없을 때 이니셜 표시
+            <View
+              style={[
+                styles.myProfileAvatar,
+                {
+                  justifyContent: "center",
+                  alignItems: "center",
+                  backgroundColor: "#F0F0F0",
+                },
+              ]}
+            >
+              <Text
+                style={{ fontSize: 18, fontWeight: "bold", color: "#888888" }}
+              >
+                {myName.charAt(0)}
+              </Text>
+            </View>
           )}
           <Text style={styles.myProfileName}>{myName}</Text>
         </Pressable>
+
         <View style={styles.divider} />
+
         <View style={[styles.friendCountRow, styles.friendCountRowInline]}>
           <Text style={styles.friendCountLabel}>친구 수</Text>
           <Text style={styles.friendCountValue}>{friends.length}명</Text>
@@ -548,8 +559,6 @@ export default function FriendsScreen() {
             <View
               style={[styles.friendRow, { justifyContent: "space-between" }]}
             >
-              {/* 왼쪽: 프로필 사진 + 이름 영역 */}
-              {/* onPress 시 handleEnterChat 호출 */}
               <Pressable
                 style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
                 onLongPress={() => handleLongPressFriend(item)}
@@ -568,7 +577,6 @@ export default function FriendsScreen() {
                 </Text>
               </Pressable>
 
-              {/* 오른쪽: 점 3개 메뉴 버튼 */}
               <TouchableOpacity
                 style={styles.moreButton}
                 onPress={() => handleOpenFriendMenu(item)}
@@ -759,13 +767,10 @@ export default function FriendsScreen() {
           animationType="fade"
           onRequestClose={() => setMenuVisible(false)}
         >
-          {/* 모달 바깥 터치시 닫기 */}
           <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
             <View style={styles.menuOverlay}>
-              {/* 메뉴 박스 내부 터치시 닫기 방지 */}
               <TouchableWithoutFeedback>
                 <View style={styles.menuContainer}>
-                  {/* 상단 이름 영역 */}
                   <View style={styles.menuHeader}>
                     <Text style={styles.menuTitle}>
                       {menuType === "FRIEND"
@@ -792,7 +797,6 @@ export default function FriendsScreen() {
                       >
                         <Text style={styles.menuItemText}>삭제</Text>
                       </TouchableOpacity>
-                      {/* 차단 버튼 */}
                       <TouchableOpacity
                         style={styles.menuItem}
                         onPress={handleBlockFriend}
