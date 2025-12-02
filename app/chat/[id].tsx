@@ -412,6 +412,7 @@ export default function ChatRoomScreen() {
         console.log("📩 소켓 메시지 수신:", m);
 
         const normalized = normalizeRestMessage(m);
+        normalized.createdAt = new Date().toISOString();
         const key = String(normalized.messageId);
 
         // 1. 내가 보낸 메시지라면 스킵 (onSend에서 이미 그렸으므로)
@@ -515,11 +516,17 @@ export default function ChatRoomScreen() {
     [deleteLocalMessage, sendContent]
   );
 
-  // ✅ [수정] onSend: "화면에 즉시 그리고(실시간성 보장)", 서버로 전송
+  const [isSending, setIsSending] = useState(false);
+
   const onSend = useCallback(async () => {
     console.log("🚀 onSend 실행됨. 텍스트:", text);
 
-    if (initialLoading) {
+    if (isSending) {
+      console.log("⚠️ 이미 전송 중...");
+      return;
+    }
+
+    if (initialLoading || isSending) {
       console.log("⚠️ 아직 로딩중이라 전송 불가");
       return;
     }
@@ -531,6 +538,9 @@ export default function ChatRoomScreen() {
       console.error("❌ myId 없음 (로그인 정보 로드 실패)");
       return;
     }
+
+    // 전송 시ㄱ
+    setIsSending(true);
 
     // 1. 입력창 비우기
     setText("");
@@ -561,11 +571,17 @@ export default function ChatRoomScreen() {
     });
 
     // 5. 소켓 전송
-    await sendContent(tempId, t);
+    try {
+      await sendContent(tempId, t);
+    } finally {
+      // ✅ 전송 완료 (성공/실패 관계없이)
+      setTimeout(() => setIsSending(false), 300);
+    }
 
     // 6. 입력창 포커스
     inputRef.current?.focus();
   }, [
+    isSending,
     initialLoading,
     text,
     myId,
