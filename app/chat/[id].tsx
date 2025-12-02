@@ -180,7 +180,12 @@ type SendStatusMap = Record<string, SendState>;
 
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
-  const { id, title } = useLocalSearchParams<{ id?: string; title?: string }>();
+
+  const { id, title, targetName } = useLocalSearchParams<{
+    id?: string;
+    title?: string;
+    targetName?: string;
+  }>();
 
   const roomIdOrNull = useMemo(() => {
     const n = Number(id);
@@ -192,8 +197,27 @@ export default function ChatRoomScreen() {
   const rootNav = useRootNavigationState();
   const navReady = !!rootNav?.key;
 
-  const headerTitle =
-    typeof title === "string" && title.length > 0 ? title : "채팅";
+  const roomList = useChatListStore((s) => s.rooms);
+
+  // ✅ [수정] 타입 오류 해결: 'name' 속성을 찾지 못해 (found as any)로 처리
+  const headerTitle = useMemo(() => {
+    // 1. 친구 목록 등에서 직접 넘겨준 이름
+    if (typeof targetName === "string" && targetName.trim().length > 0) {
+      return targetName;
+    }
+    // 2. 채팅방 목록에서 넘어올 때의 제목
+    if (typeof title === "string" && title.trim().length > 0) {
+      return title;
+    }
+    // 3. 파라미터가 유실되었을 경우, 저장된 채팅방 목록에서 이름 찾기
+    const found = roomList.find((r) => r.roomId === roomIdOrNull);
+
+    // ★ 여기를 수정했습니다 (found as any)
+    if (found && (found as any).name) return (found as any).name;
+    if (found && (found as any).roomName) return (found as any).roomName;
+
+    return "채팅";
+  }, [targetName, title, roomList, roomIdOrNull]);
 
   const [mounted, setMounted] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -397,7 +421,7 @@ export default function ChatRoomScreen() {
     [roomIdOrNull]
   );
 
-  // ✅ [수정] 소켓 메시지 수신부: "내 메시지는 무시"하여 중복 방지
+  // ✅ 소켓 메시지 수신부: "내 메시지는 무시"하여 중복 방지
   useEffect(() => {
     if (!subscribeRoom) return;
     if (roomIdOrNull == null) return;
