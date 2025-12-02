@@ -23,8 +23,7 @@ import {
 import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
-// ✅ [수정 1] 스토어 타입(ChatRoomUserListItem)과 100% 일치시킴
-// type과 unreadCount를 필수로 지정하여 TS 에러 방지
+// ✅ [수정 1] 스토어 타입과 일치시켜 에러 방지
 interface ChatRoomItem {
   roomId: number;
   type: "SINGLE" | "GROUP"; // 필수
@@ -58,25 +57,26 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ [수정 2] 정렬 로직: 단순 입장/퇴장 시 순서 변경 방지 (메시지 시간 or 생성 시간 기준)
+  // ✅ [핵심 수정] 카카오톡 방식 정렬 로직
+  // 단순히 방에 들어갔다 나오는 시간(접속 시간)은 무시하고,
+  // 오직 '대화 시간'과 '방 생성 시간'만 비교합니다.
   const fetchRooms = useCallback(
     async (isRefresh = false) => {
       try {
         if (!isRefresh) setLoading(true);
 
-        // API 데이터를 ChatRoomItem 배열로 단언
         const data = (await getChatRoomList()) as ChatRoomItem[];
 
-        // 날짜 파싱 헬퍼 (우선순위: 메시지 시간 > 생성 시간)
+        // 날짜 파싱 헬퍼
         const getTime = (item: ChatRoomItem) => {
-          // 1. 마지막 메시지 시간 확인
+          // 1순위: 마지막 메시지 시간 (대화가 오고 간 시간)
           const msgTime = item.lastMessageAt || item.lastMessageTime;
           if (msgTime) return new Date(msgTime).getTime();
 
-          // 2. 메시지가 없으면 방 생성 시간 확인
+          // 2순위: 메시지가 없으면 방 생성 시간 (방 만든 날짜는 절대 안 변함)
           if (item.createdAt) return new Date(item.createdAt).getTime();
 
-          // 3. 둘 다 없으면 맨 아래로
+          // 둘 다 없으면 맨 아래로
           return 0;
         };
 
@@ -119,8 +119,7 @@ export default function ChatListScreen() {
     [router]
   );
 
-  // ✅ [수정 3] 채팅방 생성 후 에러(ts 2352) 해결 로직
-  // 'as ChatRoomItem'을 제거하고, 목록 갱신(fetchRooms)을 통해 온전한 데이터를 받아옵니다.
+  // ✅ [수정 3] 채팅방 생성 관련 에러 해결
   const onCreateSingle = useCallback(async () => {
     const trimmed = partnerId.trim();
     if (!trimmed) {
@@ -137,7 +136,6 @@ export default function ChatListScreen() {
     try {
       setCreating(true);
 
-      // API 호출 (이 응답에는 type, unreadCount가 없을 수 있음)
       const response = await createOrGetSingleChatRoom(idNum);
 
       if (!response.roomId) {
@@ -148,10 +146,8 @@ export default function ChatListScreen() {
       setShowCreate(false);
       setPartnerId("");
 
-      // 1. 전체 목록을 서버에서 다시 불러옴 (이때 완전한 데이터가 스토어에 들어감)
+      // 목록 갱신 후 이동
       await fetchRooms();
-
-      // 2. 채팅방으로 이동 (단순히 ID와 이름만 있으면 이동 가능)
       goRoom(response.roomId, response.roomName || "채팅방");
     } catch (err: any) {
       console.error("[ChatList] 1:1 채팅방 생성 실패:", err);
@@ -214,10 +210,9 @@ export default function ChatListScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            // 스토어 타입과 일치하므로 안전하게 사용
             const roomItem = item as ChatRoomItem;
 
-            // 메시지 우선순위 처리
+            // 메시지 표시 우선순위
             const displayMessage =
               roomItem.lastMessageContent &&
               roomItem.lastMessageContent.trim() !== ""
