@@ -376,17 +376,17 @@ export async function disconnectStomp() {
 /* ==================================
  * 메시지 전송
  * ================================== */
-export async function sendChatMessage(
-  roomId: number,
-  _senderId: number,
-  content: string,
-  type: MessageType = "TEXT"
-) {
+
+export async function sendChatMessage(payload: {
+  roomId: number;
+  senderId: number;
+  content: string;
+  type: MessageType;
+  clientTempId: number; // 낙관적 업데이트를 위한 임시 ID
+}) {
   if (!client || !client.connected) {
     throw new Error("STOMP 연결이 필요합니다");
   }
-
-  const payload = { roomId, content, type };
 
   client.publish({
     destination: "/app/chat/message",

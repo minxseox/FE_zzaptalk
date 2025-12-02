@@ -141,7 +141,8 @@ function mergeDedupeSort(
     map.set(String((m as any).messageId), m);
   }
   return Array.from(map.values()).sort(
-    (x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt)
+    (x, y) =>
+      Date.parse(x.sentAt || x.createdAt) - Date.parse(y.sentAt || y.createdAt)
   );
 }
 
