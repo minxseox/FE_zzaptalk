@@ -199,20 +199,14 @@ export default function ChatRoomScreen() {
 
   const roomList = useChatListStore((s) => s.rooms);
 
-  // ✅ [수정] 타입 오류 해결: 'name' 속성을 찾지 못해 (found as any)로 처리
   const headerTitle = useMemo(() => {
-    // 1. 친구 목록 등에서 직접 넘겨준 이름
     if (typeof targetName === "string" && targetName.trim().length > 0) {
       return targetName;
     }
-    // 2. 채팅방 목록에서 넘어올 때의 제목
     if (typeof title === "string" && title.trim().length > 0) {
       return title;
     }
-    // 3. 파라미터가 유실되었을 경우, 저장된 채팅방 목록에서 이름 찾기
     const found = roomList.find((r) => r.roomId === roomIdOrNull);
-
-    // ★ 여기를 수정했습니다 (found as any)
     if (found && (found as any).name) return (found as any).name;
     if (found && (found as any).roomName) return (found as any).roomName;
 
@@ -235,7 +229,6 @@ export default function ChatRoomScreen() {
   const [text, setText] = useState("");
   const [myId, setMyId] = useState<number | null>(null);
 
-  // ---------- [1] 디버깅 로그 ----------
   useEffect(() => {
     console.log("=== [ChatRoomScreen] 상태 확인 ===");
     console.log("roomId:", roomIdOrNull);
@@ -243,7 +236,6 @@ export default function ChatRoomScreen() {
     console.log("messages 개수:", messages.length);
     console.log("initialLoading:", initialLoading);
   }, [roomIdOrNull, myId, messages.length, initialLoading]);
-  // ---------------------------------------------
 
   const flatRef = useRef<FlatList<ChatMessageResponse> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
@@ -371,10 +363,11 @@ export default function ChatRoomScreen() {
     resetUnreadCount(roomIdOrNull);
   }, [navReady, roomIdOrNull, initialLoad, resetUnreadCount]);
 
+  // ✅ [중요] 메시지 길이가 달라지면 바닥으로 스크롤 (useLayoutEffect + onContentSizeChange 이중 안전장치)
   useLayoutEffect(() => {
     if (!mounted) return;
     if (messages.length > prevLenRef.current) {
-      requestAnimationFrame(() => safeScrollToBottom(true));
+      requestAnimationFrame(() => safeScrollToBottom(false)); // 초기 로딩 시 애니메이션 없이
     }
     prevLenRef.current = messages.length;
   }, [messages.length, mounted, safeScrollToBottom]);
@@ -421,7 +414,6 @@ export default function ChatRoomScreen() {
     [roomIdOrNull]
   );
 
-  // ✅ 소켓 메시지 수신부: "내 메시지는 무시"하여 중복 방지
   useEffect(() => {
     if (!subscribeRoom) return;
     if (roomIdOrNull == null) return;
@@ -438,19 +430,14 @@ export default function ChatRoomScreen() {
         const normalized = normalizeRestMessage(m);
         const key = String(normalized.messageId);
 
-        // 1. 내가 보낸 메시지라면 스킵 (onSend에서 이미 그렸으므로)
         if (myId && normalized.senderId === myId) {
-          console.log("✋ 내가 보낸 메시지라 소켓 수신은 건너뜀 (중복 방지)");
           return;
         }
 
-        // 2. 이미 받은 메시지인지 확인 (혹시 모를 중복 방지)
         if (idSetRef.current.has(key)) {
-          console.log("♻️ 중복 ID 메시지 무시:", key);
           return;
         }
 
-        // 3. 상대방 메시지라면 화면에 추가
         idSetRef.current.add(key);
         addMsg(roomIdOrNull, normalized);
         updateLast(
@@ -463,7 +450,7 @@ export default function ChatRoomScreen() {
     );
 
     return () => unsub?.();
-  }, [roomIdOrNull, myId]); // myId가 바뀔 때도 재구독 체크 (필수)
+  }, [roomIdOrNull, myId]);
 
   if (!navReady) return null;
   if (roomIdOrNull == null) return <Redirect href={"/chatlist" as Href} />;
@@ -503,7 +490,6 @@ export default function ChatRoomScreen() {
     [myId, markStatus, roomIdOrNull]
   );
 
-  //리렌더 로그 확인
   useEffect(() => {
     console.log("[UI] messages length =", messages.length);
   }, [messages.length]);
@@ -542,29 +528,15 @@ export default function ChatRoomScreen() {
   const [isSending, setIsSending] = useState(false);
 
   const onSend = useCallback(async () => {
-    console.log("🚀 onSend 실행됨. 텍스트:", text);
-
-    if (isSending) {
-      console.log("⚠️ 이미 전송 중...");
-      return;
-    }
-
-    if (initialLoading || isSending) {
-      console.log("⚠️ 아직 로딩중이라 전송 불가");
-      return;
-    }
+    if (isSending) return;
+    if (initialLoading || isSending) return;
 
     const t = text.trim();
     if (!t) return;
-
-    if (!myId) {
-      console.error("❌ myId 없음 (로그인 정보 로드 실패)");
-      return;
-    }
+    if (!myId) return;
 
     setIsSending(true);
 
-    // 임시 ID 및 데이터 생성
     const tempId = Date.now() + Math.floor(Math.random() * 1000);
     const nowIso = new Date().toISOString();
 
@@ -579,29 +551,24 @@ export default function ChatRoomScreen() {
       type: "TEXT",
     };
 
-    // 화면 업데이트
     idSetRef.current.add(String(tempId));
     addMessage(roomIdOrNull, optimisticMsg);
     updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
 
-    // 입력창 비우기
     requestAnimationFrame(() => {
       setText("");
     });
 
-    // 스크롤 내리기
     requestAnimationFrame(() => {
       requestAnimationFrame(() => safeScrollToBottom(true));
     });
 
-    // 소켓 전송
     try {
       await sendContent(tempId, t);
     } finally {
       setTimeout(() => setIsSending(false), 300);
     }
 
-    // 입력창 포커스
     inputRef.current?.focus();
   }, [
     isSending,
@@ -786,6 +753,18 @@ export default function ChatRoomScreen() {
           onScrollBeginDrag={() => Platform.OS !== "web" && Keyboard.dismiss()}
           onScrollToIndexFailed={onScrollToIndexFailed}
           extraData={[mounted, sendStatus, myId]}
+          // ✅ [추가] 리스트 사이즈가 변하면(데이터 로드 시) 즉시 바닥으로 이동
+          onContentSizeChange={() => {
+            if (messages.length > 0) {
+              flatRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
+          // ✅ [추가] 초기 레이아웃 잡힐 때도 바닥으로 이동
+          onLayout={() => {
+            if (messages.length > 0) {
+              flatRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
         />
       )}
 
