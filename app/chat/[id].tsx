@@ -3,7 +3,7 @@ import React, {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
+  useRef, // 💡 추가
   useState,
 } from "react";
 import {
@@ -252,6 +252,9 @@ export default function ChatRoomScreen() {
   const prevLenRef = useRef(0);
   const scrollingRef = useRef(false);
 
+  // ⭐️ 1. [추가] 초기 로딩 상태를 추적하는 Ref
+  const initialLoadRef = useRef(false);
+
   const idSetRef = useRef<Set<string>>(new Set());
 
   useEffect(() => setMounted(true), []);
@@ -355,12 +358,26 @@ export default function ChatRoomScreen() {
     }
   }, [roomIdOrNull, redirectOnce, setMessages, updateRoomLastMessage]);
 
+  // ⭐️ 2. [수정] initialLoad 호출을 단 한번으로 제한
   useEffect(() => {
     if (!navReady) return;
     if (roomIdOrNull == null) return;
 
+    // 💡 핵심 수정: 이미 로딩되었는지 확인하여 Strict Mode의 2차 호출을 막습니다.
+    if (initialLoadRef.current) {
+      resetUnreadCount(roomIdOrNull); // 언로드 카운트는 리셋
+      return;
+    }
+
+    initialLoadRef.current = true; // 로딩 시작 플래그 설정
+
     initialLoad();
     resetUnreadCount(roomIdOrNull);
+
+    // 💡 클린업: 채팅방 ID가 바뀌면 (다른 채팅방으로 이동 시) 플래그를 재설정하여 새 방의 로딩을 허용
+    return () => {
+      initialLoadRef.current = false;
+    };
   }, [navReady, roomIdOrNull, initialLoad, resetUnreadCount]);
 
   // ✅ [중요] 메시지 길이가 달라지면 바닥으로 스크롤 (useLayoutEffect + onContentSizeChange 이중 안전장치)
