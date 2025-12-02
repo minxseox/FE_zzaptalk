@@ -412,7 +412,6 @@ export default function ChatRoomScreen() {
         console.log("📩 소켓 메시지 수신:", m);
 
         const normalized = normalizeRestMessage(m);
-        normalized.createdAt = new Date().toISOString();
         const key = String(normalized.messageId);
 
         // 1. 내가 보낸 메시지라면 스킵 (onSend에서 이미 그렸으므로)
@@ -539,13 +538,9 @@ export default function ChatRoomScreen() {
       return;
     }
 
-    // 전송 시ㄱ
     setIsSending(true);
 
-    // 1. 입력창 비우기
-    setText("");
-
-    // 2. 임시 ID 및 데이터 생성
+    // 임시 ID 및 데이터 생성
     const tempId = Date.now() + Math.floor(Math.random() * 1000);
     const nowIso = new Date().toISOString();
 
@@ -560,25 +555,29 @@ export default function ChatRoomScreen() {
       type: "TEXT",
     };
 
-    // 3. 화면에 즉시 추가 (안 보이는 문제 해결)
-    idSetRef.current.add(String(tempId)); // 미리 ID 등록해둠
+    // 화면 업데이트
+    idSetRef.current.add(String(tempId));
     addMessage(roomIdOrNull, optimisticMsg);
     updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
 
-    // 4. 스크롤 내리기
+    // 입력창 비우기
+    requestAnimationFrame(() => {
+      setText("");
+    });
+
+    // 스크롤 내리기
     requestAnimationFrame(() => {
       requestAnimationFrame(() => safeScrollToBottom(true));
     });
 
-    // 5. 소켓 전송
+    // 소켓 전송
     try {
       await sendContent(tempId, t);
     } finally {
-      // ✅ 전송 완료 (성공/실패 관계없이)
       setTimeout(() => setIsSending(false), 300);
     }
 
-    // 6. 입력창 포커스
+    // 입력창 포커스
     inputRef.current?.focus();
   }, [
     isSending,
