@@ -23,20 +23,19 @@ import {
 import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
-// ✅ [수정] 정렬을 위해 시간 관련 필드 타입을 명시했습니다.
+// ✅ [수정 1] 정렬 및 데이터 표시를 위한 타입 정의 보완
 interface ChatRoomItem {
   roomId: number;
   roomName: string;
-  lastMessage?: string;
-  lastMessageAt?: string; // 마지막 메시지 시간
+  lastMessage?: string; // 마지막 대화 내용
+  lastMessageAt?: string; // 마지막 대화 시간
   createdAt?: string; // 생성 시간
-  [key: string]: any; // 다른 필드 허용
+  [key: string]: any;
 }
 
 export default function ChatListScreen() {
   const router = useRouter();
 
-  // Zustand: Hook 패턴으로 상태와 액션 구독
   const rooms = useChatListStore((state) => state.rooms);
   const setRoomsFromServer = useChatListStore(
     (state) => state.setRoomsFromServer
@@ -51,26 +50,38 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ [수정] 데이터를 받아온 후 최신순으로 정렬하는 로직 추가
+  // ✅ [수정 2] 정렬 로직 변경: "단순 입장/생성"이 아닌 "실제 대화 시간" 기준 정렬
   const fetchRooms = useCallback(
     async (isRefresh = false) => {
       try {
         if (!isRefresh) setLoading(true);
 
-        // 1. 서버에서 목록 가져오기
         const data = await getChatRoomList();
 
-        // 2. 최신순 정렬 (마지막 메시지 시간 > 생성 시간 순)
+        // 정렬 로직:
+        // 1순위: 마지막 메시지가 있는 방이 무조건 위로 (lastMessageAt 기준 내림차순)
+        // 2순위: 둘 다 메시지가 없으면 생성일(createdAt) 기준
         const sortedData = data.sort((a: any, b: any) => {
-          // 비교할 시간값 추출 (없으면 0 처리)
-          const timeA = new Date(a.lastMessageAt || a.createdAt || 0).getTime();
-          const timeB = new Date(b.lastMessageAt || b.createdAt || 0).getTime();
+          // 메시지 시간 (없으면 0으로 취급하여 맨 뒤로 보냄)
+          const timeA = a.lastMessageAt
+            ? new Date(a.lastMessageAt).getTime()
+            : 0;
+          const timeB = b.lastMessageAt
+            ? new Date(b.lastMessageAt).getTime()
+            : 0;
 
-          // 내림차순 정렬 (큰 값이 먼저 = 최신이 위로)
-          return timeB - timeA;
+          // 1. 둘 중 하나라도 메시지가 있거나 시간이 다르면 메시지 시간 역순 정렬
+          if (timeA !== timeB) {
+            return timeB - timeA; // 최신 메시지가 위로 (큰 값이 먼저)
+          }
+
+          // 2. 둘 다 메시지가 없는 경우(0)에는 생성일 기준 (최신 생성 방이 위로 올지 아래로 갈지 결정)
+          // 보통 메시지가 없으면 최신 생성된 방이 위로 오는 것이 자연스럽습니다.
+          const createA = new Date(a.createdAt || 0).getTime();
+          const createB = new Date(b.createdAt || 0).getTime();
+          return createB - createA;
         });
 
-        // 3. 정렬된 데이터를 스토어에 저장
         setRoomsFromServer(sortedData);
       } catch (e) {
         console.error("[ChatList] 채팅방 목록 조회 실패:", e);
@@ -82,7 +93,6 @@ export default function ChatListScreen() {
     [setRoomsFromServer]
   );
 
-  // 포커스 시 갱신
   useFocusEffect(
     useCallback(() => {
       fetchRooms();
@@ -121,7 +131,6 @@ export default function ChatListScreen() {
       setCreating(true);
       const room = await createOrGetSingleChatRoom(idNum);
 
-      // 타입 안전하게 처리
       const r = room as ChatRoomItem;
       const roomId = r.roomId;
       const roomName = r.roomName || "채팅방";
@@ -134,7 +143,6 @@ export default function ChatListScreen() {
       setShowCreate(false);
       setPartnerId("");
 
-      // 방 생성 후 목록 갱신 및 이동
       await fetchRooms();
       goRoom(roomId, roomName);
     } catch (err: any) {
@@ -221,13 +229,24 @@ export default function ChatListScreen() {
                     <Text style={styles.roomName} numberOfLines={1}>
                       {roomItem.roomName || "알 수 없는 채팅방"}
                     </Text>
+                    {/* ✅ [추가] 마지막 메시지 시간 표시 (선택 사항) */}
+                    {/* {roomItem.lastMessageAt && (
+                      <Text style={{ fontSize: 11, color: "#aaa" }}>
+                        {new Date(roomItem.lastMessageAt).toLocaleDateString()}
+                      </Text>
+                    )} */}
                   </View>
 
+                  {/* ✅ [확인] 마지막 대화 내용 표시 */}
+                  {/* 새로고침 시 안 보인다면, 서버 응답의 필드명(예: lastMessageContent)을 확인해야 합니다. */}
+                  {/* 여기서는 lastMessage가 있으면 보여주고, 없으면 기본 문구를 보여줍니다. */}
                   <Text
                     style={{ fontSize: 13, color: "#888" }}
                     numberOfLines={1}
                   >
-                    {roomItem.lastMessage || "대화 내용이 없습니다."}
+                    {roomItem.lastMessage && roomItem.lastMessage.trim() !== ""
+                      ? roomItem.lastMessage
+                      : "대화 내용이 없습니다."}
                   </Text>
                 </View>
               </Pressable>
@@ -236,7 +255,7 @@ export default function ChatListScreen() {
         />
       )}
 
-      {/* 채팅방 생성 모달 */}
+      {/* 모달 관련 코드는 변경 없음 */}
       <Modal
         visible={showCreate}
         transparent
