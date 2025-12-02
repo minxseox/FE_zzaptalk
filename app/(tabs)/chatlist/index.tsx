@@ -23,15 +23,14 @@ import {
 import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
-// ✅ [수정 1] 스토어(ChatRoomUserListItem)와 타입을 완벽히 일치시킴
-// type과 unreadCount를 필수로 설정하여 setRoomsFromServer 에러 해결
+// ✅ [수정 1] 스토어 타입(ChatRoomUserListItem)과 100% 일치시킴
 interface ChatRoomItem {
   roomId: number;
   type: "SINGLE" | "GROUP"; // 필수
   roomName: string;
   unreadCount: number; // 필수
 
-  // 메시지 및 시간 관련 필드 (서버 응답에 따라 선택적)
+  // 메시지 및 시간 (서버 필드명에 따라 매핑)
   lastMessageContent?: string;
   lastMessage?: string | null;
   lastMessageTime?: string;
@@ -58,29 +57,35 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // --- 목록 불러오기 및 정렬 ---
+  // ✅ [수정 2] 정렬 로직: 단순 입장/퇴장 시 순서 변경 방지
   const fetchRooms = useCallback(
     async (isRefresh = false) => {
       try {
         if (!isRefresh) setLoading(true);
 
-        // API 결과를 ChatRoomItem 배열로 타입 단언
+        // API 데이터를 ChatRoomItem 배열로 단언
         const data = (await getChatRoomList()) as ChatRoomItem[];
 
-        // 날짜 파싱 헬퍼
+        // 날짜 파싱 헬퍼 (우선순위: 메시지 시간 > 생성 시간)
         const getTime = (item: ChatRoomItem) => {
-          const timeStr = item.lastMessageAt || item.lastMessageTime;
-          return timeStr ? new Date(timeStr).getTime() : 0;
+          // 1. 마지막 메시지 시간 확인
+          const msgTime = item.lastMessageAt || item.lastMessageTime;
+          if (msgTime) return new Date(msgTime).getTime();
+
+          // 2. 메시지가 없으면 방 생성 시간 확인
+          if (item.createdAt) return new Date(item.createdAt).getTime();
+
+          // 3. 둘 다 없으면 맨 아래로
+          return 0;
         };
 
-        // 최신 메시지 순 정렬
+        // 내림차순 정렬 (최신 시간이 위로)
         const sortedData = data.sort((a, b) => {
           const timeA = getTime(a);
           const timeB = getTime(b);
           return timeB - timeA;
         });
 
-        // ✅ 이제 타입이 일치하므로 빨간줄이 뜨지 않습니다.
         setRoomsFromServer(sortedData);
       } catch (e) {
         console.error("[ChatList] 채팅방 목록 조회 실패:", e);
@@ -113,7 +118,7 @@ export default function ChatListScreen() {
     [router]
   );
 
-  // --- 채팅방 생성 로직 ---
+  // ✅ [수정 3] 채팅방 생성 후 에러(ts 2352) 해결 로직
   const onCreateSingle = useCallback(async () => {
     const trimmed = partnerId.trim();
     if (!trimmed) {
@@ -130,10 +135,11 @@ export default function ChatListScreen() {
     try {
       setCreating(true);
 
-      // ✅ [수정 2] 생성 API 호출 결과 처리 방식 변경
-      // createOrGetSingleChatRoom은 ChatRoomResponse(간략 정보)를 반환합니다.
-      // 이를 ChatRoomItem(상세 정보)으로 강제 형변환(as)하면 type, unreadCount가 없어서 에러가 납니다.
+      // API 호출 (ChatRoomResponse 반환)
       const response = await createOrGetSingleChatRoom(idNum);
+
+      // ⚠️ 중요: 여기서 'as ChatRoomItem'을 하지 않습니다.
+      // API 응답에는 unreadCount나 type 정보가 없을 수 있기 때문입니다.
 
       if (!response.roomId) {
         Alert.alert("오류", "생성된 채팅방 ID를 찾을 수 없어요.");
@@ -143,10 +149,10 @@ export default function ChatListScreen() {
       setShowCreate(false);
       setPartnerId("");
 
-      // 1. 목록 새로고침 (이때 완전한 ChatRoomItem 정보를 받아와서 스토어에 넣음)
+      // 1. 전체 목록을 서버에서 다시 불러옴 (이때 완전한 데이터가 스토어에 들어감)
       await fetchRooms();
 
-      // 2. 채팅방으로 이동 (생성 결과에서 ID와 이름만 사용)
+      // 2. 채팅방으로 이동 (ID와 이름만 사용)
       goRoom(response.roomId, response.roomName || "채팅방");
     } catch (err: any) {
       console.error("[ChatList] 1:1 채팅방 생성 실패:", err);
@@ -209,7 +215,7 @@ export default function ChatListScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            // 스토어에 저장된 데이터는 이미 ChatRoomItem 형식이므로 안심하고 사용
+            // 스토어 타입과 일치하므로 안전하게 사용
             const roomItem = item as ChatRoomItem;
 
             // 메시지 우선순위 처리
@@ -290,7 +296,7 @@ export default function ChatListScreen() {
         />
       )}
 
-      {/* 생성 모달 (기존 유지) */}
+      {/* 생성 모달 (기존 코드 유지) */}
       <Modal
         visible={showCreate}
         transparent

@@ -3,7 +3,7 @@ import React, {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef, // 💡 추가
+  useRef,
   useState,
 } from "react";
 import {
@@ -168,9 +168,23 @@ async function getMyId(): Promise<number | null> {
   }
 }
 
-async function sendCompat(roomId: number, myId: number, content: string) {
+// 🚨 [핵심 수정 1] sendCompat 함수 시그니처 변경: clientTempId를 받도록 수정
+async function sendCompat(
+  roomId: number,
+  myId: number,
+  content: string,
+  clientTempId: number // 💡 클라이언트 임시 ID 추가
+): Promise<void> {
   if (!sendChatMessageRaw) return;
-  return sendChatMessageRaw(roomId, myId, content);
+
+  // 🚨 [핵심 수정 1-1] sendChatMessageRaw 호출 시 clientTempId를 포함하여 전송
+  return sendChatMessageRaw({
+    roomId,
+    content,
+    clientTempId,
+    senderId: myId,
+    type: "TEXT", // 백엔드 DTO에 맞게 설정
+  });
 }
 
 const EMPTY: ChatMessageResponse[] = [];
@@ -431,31 +445,62 @@ export default function ChatRoomScreen() {
     [roomIdOrNull]
   );
 
+  // 🚨 [핵심 수정 4] 소켓 리스너 로직 수정: clientTempId를 사용하여 메시지 교체
   useEffect(() => {
     if (!subscribeRoom) return;
     if (roomIdOrNull == null) return;
 
     const addMsg = useChatStore.getState().addMessage;
     const updateLast = useChatListStore.getState().updateRoomLastMessage;
+    const removeMsg = removeMessageByIdNow; // 교체 시 삭제 함수 사용
 
     const unsub = subscribeRoom(
       roomIdOrNull,
       myId ?? 0,
-      (m: ChatMessageResponse) => {
+      (m: ChatMessageResponse & { clientTempId?: number }) => {
         console.log("📩 소켓 메시지 수신:", m);
 
         const normalized = normalizeRestMessage(m);
-        const key = String(normalized.messageId);
+        const permanentKey = String(normalized.messageId);
 
+        // 🚨 [핵심 수정 4-1] 내가 보낸 메시지이며, clientTempId를 가지고 있을 때 (교체 대상)
+        if (m.clientTempId && normalized.senderId === myId) {
+          const tempId = m.clientTempId;
+          const tempKey = String(tempId);
+
+          console.log(
+            `⚡️ 교체 감지: 임시 ID ${tempId} -> 영구 ID ${permanentKey}`
+          );
+
+          // 1. 낙관적 메시지(임시 ID) 삭제
+          removeMsg(tempId);
+
+          // 2. 영구 ID를 set에 추가
+          idSetRef.current.add(permanentKey);
+
+          // 3. 영구 메시지 객체로 로컬 목록에 추가
+          addMsg(roomIdOrNull, normalized);
+
+          // 4. 전송 상태 업데이트는 removeMsg에서 이미 처리되거나 필요 없으므로 생략
+
+          // 5. 교체 완료 후 함수 종료 (중복 추가 방지)
+          return;
+        }
+
+        // 🚨 [핵심 수정 4-2] 타인이 보낸 메시지 (기존 로직 유지)
+
+        // 내가 보낸 메시지이지만 clientTempId가 없는 경우 (예외 상황)
         if (myId && normalized.senderId === myId) {
+          return; // 무시 (이미 낙관적 업데이트로 화면에 있음)
+        }
+
+        // 이미 로컬에 있는 영구 ID인지 확인하여 무시
+        if (idSetRef.current.has(permanentKey)) {
           return;
         }
 
-        if (idSetRef.current.has(key)) {
-          return;
-        }
-
-        idSetRef.current.add(key);
+        // 타인 메시지 추가
+        idSetRef.current.add(permanentKey);
         addMsg(roomIdOrNull, normalized);
         updateLast(
           roomIdOrNull,
@@ -467,7 +512,7 @@ export default function ChatRoomScreen() {
     );
 
     return () => unsub?.();
-  }, [roomIdOrNull, myId]);
+  }, [roomIdOrNull, myId, removeMessageByIdNow]); // removeMessageByIdNow를 의존성 배열에 추가
 
   if (!navReady) return null;
   if (roomIdOrNull == null) return <Redirect href={"/chatlist" as Href} />;
@@ -489,16 +534,21 @@ export default function ChatRoomScreen() {
     [removeMessageByIdNow]
   );
 
+  // 🚨 [핵심 수정 2] sendContent 함수 시그니처 변경: clientTempId를 받도록 수정
   const sendContent = useCallback(
-    async (msgId: number, content: string) => {
+    async (msgId: number, content: string, clientTempId: number) => {
       if (!myId) return;
 
       markStatus(msgId, "sending");
       try {
-        if (sendChatMessageRaw) await sendCompat(roomIdOrNull, myId, content);
+        if (sendChatMessageRaw) {
+          // 🚨 [핵심 수정 2-1] sendCompat에 clientTempId 전달
+          await sendCompat(roomIdOrNull, myId, content, clientTempId);
+        }
         console.log("✅ 소켓 전송 API 호출 성공");
 
-        markStatus(msgId, undefined);
+        // 이 로직은 소켓 리스너로 이동했으므로 여기서 제거 (성공해도 상태를 바로 지우지 않음)
+        // markStatus(msgId, undefined);
       } catch {
         console.error("❌ 소켓 전송 실패");
         markStatus(msgId, "failed");
@@ -513,7 +563,8 @@ export default function ChatRoomScreen() {
 
   const openFailActionSheet = useCallback(
     (msgId: number, content: string) => {
-      const doResend = () => sendContent(msgId, content);
+      // 🚨 [수정 3] 재전송 시에도 clientTempId(msgId)를 사용해야 함
+      const doResend = () => sendContent(msgId, content, msgId);
       const doDelete = () => deleteLocalMessage(msgId);
 
       if (Platform.OS === "ios") {
@@ -544,6 +595,7 @@ export default function ChatRoomScreen() {
 
   const [isSending, setIsSending] = useState(false);
 
+  // 🚨 [핵심 수정 3] onSend 함수 수정: tempId 생성 후 sendContent에 전달
   const onSend = useCallback(async () => {
     if (isSending) return;
     if (initialLoading || isSending) return;
@@ -554,6 +606,7 @@ export default function ChatRoomScreen() {
 
     setIsSending(true);
 
+    // 🚨 [핵심 수정 3-1] 임시 ID 생성 및 사용
     const tempId = Date.now() + Math.floor(Math.random() * 1000);
     const nowIso = new Date().toISOString();
 
@@ -581,7 +634,8 @@ export default function ChatRoomScreen() {
     });
 
     try {
-      await sendContent(tempId, t);
+      // 🚨 [핵심 수정 3-2] sendContent에 임시 ID를 전달
+      await sendContent(tempId, t, tempId);
     } finally {
       setTimeout(() => setIsSending(false), 300);
     }
