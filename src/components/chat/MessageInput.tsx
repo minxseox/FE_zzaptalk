@@ -70,7 +70,6 @@ export default function MessageInput({
           style={[chatRoomStyles.input, { maxHeight: 100 }]}
           multiline
           onKeyPress={handleKeyPress}
-          onSubmitEditing={Platform.OS !== "web" ? onSend : undefined}
           blurOnSubmit={false}
           textAlignVertical="center"
           // ✅ 3. 웹 환경(React Native Web)에서 Composition 이벤트 바인딩
