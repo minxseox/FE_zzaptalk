@@ -464,39 +464,49 @@ export default function ChatRoomScreen() {
         const normalized = normalizeRestMessage(m);
         const permanentKey = String(normalized.messageId);
 
-        // 🚨 [핵심 수정 4-1] 내가 보낸 메시지이며, clientTempId를 가지고 있을 때 (교체 대상)
-        if (m.clientTempId && normalized.senderId === myId) {
-          const tempId = m.clientTempId;
-          const tempKey = String(tempId);
+        if (normalized.senderId === myId) {
+          // A. 내가 보낸 메시지이며, clientTempId를 가지고 있을 때 (낙관적 메시지 교체 대상)
+          if (m.clientTempId) {
+            const tempId = m.clientTempId;
 
+            console.log(
+              `⚡️ 교체 감지: 임시 ID ${tempId} -> 영구 ID ${permanentKey}`
+            );
+
+            // 1. 낙관적 메시지(임시 ID) 삭제
+            removeMsg(tempId);
+
+            // 2. 영구 ID를 set에 추가
+            if (!idSetRef.current.has(permanentKey)) {
+              idSetRef.current.add(permanentKey);
+              // 3. 영구 메시지 객체로 로컬 목록에 추가 (교체)
+              addMsg(roomIdOrNull, normalized);
+            }
+
+            // 4. 교체 완료. 이 경우는 무조건 여기서 종료.
+            return;
+          }
+
+          // B. 내가 보낸 메시지이지만 clientTempId가 없는 경우 (❌ 중복 추가 발생 지점)
+          //    -> 이 경우는 내 메시지가 DB에 저장된 후, 서버가 토픽으로 다시 뿌려주는 메시지입니다.
+          //    -> 이미 낙관적 업데이트로 화면에 있으므로, 이 메시지는 **무조건 무시**해야 합니다.
+          //    -> (clientTempId가 없는 내 메시지는 중복이므로 무시)
           console.log(
-            `⚡️ 교체 감지: 임시 ID ${tempId} -> 영구 ID ${permanentKey}`
+            `🚫 [Socket] 내가 보낸 메시지 (교체 아님) 무시:`,
+            normalized
           );
-
-          // 1. 낙관적 메시지(임시 ID) 삭제
-          removeMsg(tempId);
-
-          // 2. 영구 ID를 set에 추가
-          idSetRef.current.add(permanentKey);
-
-          // 3. 영구 메시지 객체로 로컬 목록에 추가
-          addMsg(roomIdOrNull, normalized);
-
-          // 4. 전송 상태 업데이트는 removeMsg에서 이미 처리되거나 필요 없으므로 생략
-
-          // 5. 교체 완료 후 함수 종료 (중복 추가 방지)
           return;
         }
+        // 🚨 [수정된 로직 종료]
 
-        // 🚨 [핵심 수정 4-2] 타인이 보낸 메시지 (기존 로직 유지)
-
-        // 내가 보낸 메시지이지만 clientTempId가 없는 경우 (예외 상황)
-        if (myId && normalized.senderId === myId) {
-          return; // 무시 (이미 낙관적 업데이트로 화면에 있음)
-        }
+        // C. 타인이 보낸 메시지 (기존 로직 유지)
 
         // 이미 로컬에 있는 영구 ID인지 확인하여 무시
         if (idSetRef.current.has(permanentKey)) {
+          console.log(
+            `🚫 [Socket] 중복 메시지 (ID:${permanentKey}) 무시:`,
+            normalized
+          );
           return;
         }
 
