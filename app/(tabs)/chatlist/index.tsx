@@ -1,4 +1,3 @@
-// app/(tabs)/chatlist/index.tsx
 import React, { useState, useCallback } from "react";
 import {
   ActivityIndicator,
@@ -24,19 +23,20 @@ import {
 import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
-// ✅ [Tip] src/types/chat.ts의 ChatRoom 타입에 lastMessage?: string; 을 추가하면 더 좋습니다.
-// 이 파일 내에서만 임시로 타입을 확장해서 쓰고 싶다면 아래처럼 정의합니다.
+// ✅ [수정] 정렬을 위해 시간 관련 필드 타입을 명시했습니다.
 interface ChatRoomItem {
   roomId: number;
   roomName: string;
   lastMessage?: string;
+  lastMessageAt?: string; // 마지막 메시지 시간
+  createdAt?: string; // 생성 시간
   [key: string]: any; // 다른 필드 허용
 }
 
 export default function ChatListScreen() {
   const router = useRouter();
 
-  // ✅ [수정] Zustand: Hook 패턴으로 상태와 액션 구독 (반응성 확보)
+  // Zustand: Hook 패턴으로 상태와 액션 구독
   const rooms = useChatListStore((state) => state.rooms);
   const setRoomsFromServer = useChatListStore(
     (state) => state.setRoomsFromServer
@@ -51,14 +51,27 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ [수정] getState() 대신 Hook으로 가져온 setRoomsFromServer 사용
+  // ✅ [수정] 데이터를 받아온 후 최신순으로 정렬하는 로직 추가
   const fetchRooms = useCallback(
     async (isRefresh = false) => {
       try {
         if (!isRefresh) setLoading(true);
 
+        // 1. 서버에서 목록 가져오기
         const data = await getChatRoomList();
-        setRoomsFromServer(data);
+
+        // 2. 최신순 정렬 (마지막 메시지 시간 > 생성 시간 순)
+        const sortedData = data.sort((a: any, b: any) => {
+          // 비교할 시간값 추출 (없으면 0 처리)
+          const timeA = new Date(a.lastMessageAt || a.createdAt || 0).getTime();
+          const timeB = new Date(b.lastMessageAt || b.createdAt || 0).getTime();
+
+          // 내림차순 정렬 (큰 값이 먼저 = 최신이 위로)
+          return timeB - timeA;
+        });
+
+        // 3. 정렬된 데이터를 스토어에 저장
+        setRoomsFromServer(sortedData);
       } catch (e) {
         console.error("[ChatList] 채팅방 목록 조회 실패:", e);
       } finally {
@@ -67,7 +80,7 @@ export default function ChatListScreen() {
       }
     },
     [setRoomsFromServer]
-  ); // 의존성 추가
+  );
 
   // 포커스 시 갱신
   useFocusEffect(
@@ -185,7 +198,6 @@ export default function ChatListScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            // ✅ [수정] as any 제거 및 안전한 접근
             const roomItem = item as ChatRoomItem;
             return (
               <Pressable
@@ -234,8 +246,6 @@ export default function ChatListScreen() {
         <KeyboardAvoidingView
           style={styles.sheetBackdrop}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
-          // 웹에서는 모달 내부 인풋 포커스 이슈가 적어서 enabled 둬도 되지만,
-          // 레이아웃이 튄다면 enabled={Platform.OS !== 'web'} 추가
         >
           <Pressable
             style={styles.sheetBackdropTouchable}
