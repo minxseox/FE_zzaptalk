@@ -405,29 +405,38 @@ export default function ChatRoomScreen() {
     const addMsg = useChatStore.getState().addMessage;
     const updateLast = useChatListStore.getState().updateRoomLastMessage;
 
-    const unsub = subscribeRoom(roomIdOrNull, (m: ChatMessageResponse) => {
-      console.log("📩 소켓 메시지 수신:", m);
+    const unsub = subscribeRoom(
+      roomIdOrNull,
+      myId ?? 0,
+      (m: ChatMessageResponse) => {
+        console.log("📩 소켓 메시지 수신:", m);
 
-      const normalized = normalizeRestMessage(m);
-      const key = String(normalized.messageId);
+        const normalized = normalizeRestMessage(m);
+        const key = String(normalized.messageId);
 
-      // 1. 내가 보낸 메시지라면 스킵 (onSend에서 이미 그렸으므로)
-      if (myId && normalized.senderId === myId) {
-        console.log("✋ 내가 보낸 메시지라 소켓 수신은 건너뜀 (중복 방지)");
-        return;
+        // 1. 내가 보낸 메시지라면 스킵 (onSend에서 이미 그렸으므로)
+        if (myId && normalized.senderId === myId) {
+          console.log("✋ 내가 보낸 메시지라 소켓 수신은 건너뜀 (중복 방지)");
+          return;
+        }
+
+        // 2. 이미 받은 메시지인지 확인 (혹시 모를 중복 방지)
+        if (idSetRef.current.has(key)) {
+          console.log("♻️ 중복 ID 메시지 무시:", key);
+          return;
+        }
+
+        // 3. 상대방 메시지라면 화면에 추가
+        idSetRef.current.add(key);
+        addMsg(roomIdOrNull, normalized);
+        updateLast(
+          roomIdOrNull,
+          normalized.content,
+          normalized.createdAt,
+          true
+        );
       }
-
-      // 2. 이미 받은 메시지인지 확인 (혹시 모를 중복 방지)
-      if (idSetRef.current.has(key)) {
-        console.log("♻️ 중복 ID 메시지 무시:", key);
-        return;
-      }
-
-      // 3. 상대방 메시지라면 화면에 추가
-      idSetRef.current.add(key);
-      addMsg(roomIdOrNull, normalized);
-      updateLast(roomIdOrNull, normalized.content, normalized.createdAt, true);
-    });
+    );
 
     return () => unsub?.();
   }, [roomIdOrNull, myId]); // myId가 바뀔 때도 재구독 체크 (필수)

@@ -319,6 +319,7 @@ export async function updateSocketToken(newToken: string): Promise<void> {
  * ================================== */
 export function subscribeRoom(
   roomId: number,
+  myUserId: number,
   onMessage: (msg: ChatMessageResponse) => void
 ) {
   if (!client || !client.connected) {
@@ -333,6 +334,12 @@ export function subscribeRoom(
     try {
       const body = JSON.parse(frame.body);
       const normalized = normalize(body);
+
+      if (normalized.senderId === myUserId) {
+        console.log(`🚫 [Socket] 내 메시지 무시:`, normalized);
+        return;
+      }
+
       console.log(`📩 [Socket] 메시지 수신:`, normalized);
       onMessage(normalized);
     } catch (e) {
