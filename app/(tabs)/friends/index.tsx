@@ -202,16 +202,19 @@ export default function FriendsScreen() {
     setMenuVisible(true);
   };
 
-  // 친구 클릭 시 채팅방으로 이동
+  // ✅ 친구 클릭 시 채팅방으로 이동 (수정됨)
   const handleEnterChat = async (friend: Friend) => {
     try {
+      // 1. 1:1 채팅방 생성 혹은 조회
       const response = await findOrCreateSingleChatRoom(friend.id);
 
+      // 2. 채팅방으로 이동하면서 targetName과 title을 함께 전달
       router.push({
         pathname: "/chat/[id]",
         params: {
-          id: response.roomId,
-          targetName: friend.name,
+          id: String(response.roomId), // 안전하게 문자열로 변환
+          targetName: friend.name, // ChatRoomScreen에서 이 값을 제목으로 사용
+          title: friend.name, // fallback용 title
         },
       });
     } catch (error) {
