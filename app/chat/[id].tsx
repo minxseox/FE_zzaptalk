@@ -397,7 +397,7 @@ export default function ChatRoomScreen() {
     [roomIdOrNull]
   );
 
-  // ✅ 소켓 메시지 수신부
+  // ✅ 소켓 메시지 수신부 (변경 없음, 여기에서만 메시지 추가됨)
   useEffect(() => {
     if (!subscribeRoom) return;
     if (roomIdOrNull == null) return;
@@ -411,7 +411,7 @@ export default function ChatRoomScreen() {
       const normalized = normalizeRestMessage(m);
       const key = String(normalized.messageId);
 
-      // 내가 방금 보낸 메시지가 서버에서 다시 오면(중복) 무시
+      // 이미 받은 메시지(혹은 내가 보낸 메시지)가 중복으로 오는지 확인
       if (idSetRef.current.has(key)) {
         console.log("♻️ 중복 메시지 무시:", key);
         return;
@@ -500,7 +500,7 @@ export default function ChatRoomScreen() {
     [deleteLocalMessage, sendContent]
   );
 
-  // ✅ [수정] onSend: "내가 보낸 건 내가 즉시 화면에 그리기"
+  // ✅ [수정] onSend: "내가 보낸 메시지 미리 그리기" 기능 제거 -> 중복 방지
   const onSend = useCallback(async () => {
     console.log("🚀 onSend 실행됨. 텍스트:", text);
 
@@ -517,50 +517,29 @@ export default function ChatRoomScreen() {
       return;
     }
 
-    // 1. 입력창 비우기
+    // 1. 입력창 비우기 (UI 반응)
     setText("");
 
-    // 2. 임시 ID 및 메시지 객체 생성
-    const nowIso = new Date().toISOString();
-    const optimisticId = Date.now() + Math.floor(Math.random() * 1000);
+    // 2. 임시 ID 생성 (전송 함수용)
+    const msgId = Date.now() + Math.floor(Math.random() * 1000);
 
-    const optimisticMsg: ChatMessageResponse = {
-      messageId: optimisticId,
-      roomId: roomIdOrNull,
-      senderId: myId,
-      content: t,
-      createdAt: nowIso,
-      sentAt: nowIso,
-      senderName: "Me",
-      type: "TEXT",
-    };
+    // --- [삭제됨] 낙관적 업데이트 로직 (화면 미리 추가) 제거 ---
+    // 이제 화면 추가는 위쪽 '소켓 메시지 수신부' useEffect에서 담당합니다.
+    // -----------------------------------------------------
 
-    // 3. 화면에 즉시 추가 (Optimistic Update)
-    console.log("➕ 내 메시지 미리 추가:", optimisticMsg);
+    // 3. 소켓 전송
+    await sendContent(msgId, t);
 
-    // 혹시 서버가 나중에 같은 ID로 메시지를 보내면 중복되지 않도록 등록
-    idSetRef.current.add(String(optimisticId));
-
-    addMessage(roomIdOrNull, optimisticMsg);
-    updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
-
-    // 4. 스크롤 아래로
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => safeScrollToBottom(true));
-    });
-
-    // 5. 소켓 전송
-    await sendContent(optimisticId, t);
-
+    // 4. 입력창 포커스 유지
     inputRef.current?.focus();
   }, [
     initialLoading,
     text,
     myId,
-    roomIdOrNull,
-    addMessage,
-    updateRoomLastMessage,
-    safeScrollToBottom,
+    // roomIdOrNull, // sendContent에서 사용하므로 의존성 제거 가능
+    // addMessage,   // 더 이상 사용 안 함
+    // updateRoomLastMessage, // 더 이상 사용 안 함
+    // safeScrollToBottom,    // 소켓 수신 시 자동 스크롤되므로 제거 가능
     sendContent,
   ]);
 
