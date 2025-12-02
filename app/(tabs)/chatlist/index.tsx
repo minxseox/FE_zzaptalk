@@ -23,13 +23,21 @@ import {
 import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
-// ✅ [수정 1] 정렬 및 데이터 표시를 위한 타입 정의 보완
+// ✅ [수정 1] 스토어(ChatRoomUserListItem)와 타입을 완벽히 일치시킴
+// type과 unreadCount를 필수로 설정하여 setRoomsFromServer 에러 해결
 interface ChatRoomItem {
   roomId: number;
+  type: "SINGLE" | "GROUP"; // 필수
   roomName: string;
-  lastMessage?: string; // 마지막 대화 내용
-  lastMessageAt?: string; // 마지막 대화 시간
-  createdAt?: string; // 생성 시간
+  unreadCount: number; // 필수
+
+  // 메시지 및 시간 관련 필드 (서버 응답에 따라 선택적)
+  lastMessageContent?: string;
+  lastMessage?: string | null;
+  lastMessageTime?: string;
+  lastMessageAt?: string | null;
+  createdAt?: string;
+
   [key: string]: any;
 }
 
@@ -50,38 +58,29 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ [수정 2] 정렬 로직 변경: "단순 입장/생성"이 아닌 "실제 대화 시간" 기준 정렬
+  // --- 목록 불러오기 및 정렬 ---
   const fetchRooms = useCallback(
     async (isRefresh = false) => {
       try {
         if (!isRefresh) setLoading(true);
 
-        const data = await getChatRoomList();
+        // API 결과를 ChatRoomItem 배열로 타입 단언
+        const data = (await getChatRoomList()) as ChatRoomItem[];
 
-        // 정렬 로직:
-        // 1순위: 마지막 메시지가 있는 방이 무조건 위로 (lastMessageAt 기준 내림차순)
-        // 2순위: 둘 다 메시지가 없으면 생성일(createdAt) 기준
-        const sortedData = data.sort((a: any, b: any) => {
-          // 메시지 시간 (없으면 0으로 취급하여 맨 뒤로 보냄)
-          const timeA = a.lastMessageAt
-            ? new Date(a.lastMessageAt).getTime()
-            : 0;
-          const timeB = b.lastMessageAt
-            ? new Date(b.lastMessageAt).getTime()
-            : 0;
+        // 날짜 파싱 헬퍼
+        const getTime = (item: ChatRoomItem) => {
+          const timeStr = item.lastMessageAt || item.lastMessageTime;
+          return timeStr ? new Date(timeStr).getTime() : 0;
+        };
 
-          // 1. 둘 중 하나라도 메시지가 있거나 시간이 다르면 메시지 시간 역순 정렬
-          if (timeA !== timeB) {
-            return timeB - timeA; // 최신 메시지가 위로 (큰 값이 먼저)
-          }
-
-          // 2. 둘 다 메시지가 없는 경우(0)에는 생성일 기준 (최신 생성 방이 위로 올지 아래로 갈지 결정)
-          // 보통 메시지가 없으면 최신 생성된 방이 위로 오는 것이 자연스럽습니다.
-          const createA = new Date(a.createdAt || 0).getTime();
-          const createB = new Date(b.createdAt || 0).getTime();
-          return createB - createA;
+        // 최신 메시지 순 정렬
+        const sortedData = data.sort((a, b) => {
+          const timeA = getTime(a);
+          const timeB = getTime(b);
+          return timeB - timeA;
         });
 
+        // ✅ 이제 타입이 일치하므로 빨간줄이 뜨지 않습니다.
         setRoomsFromServer(sortedData);
       } catch (e) {
         console.error("[ChatList] 채팅방 목록 조회 실패:", e);
@@ -114,6 +113,7 @@ export default function ChatListScreen() {
     [router]
   );
 
+  // --- 채팅방 생성 로직 ---
   const onCreateSingle = useCallback(async () => {
     const trimmed = partnerId.trim();
     if (!trimmed) {
@@ -129,13 +129,13 @@ export default function ChatListScreen() {
 
     try {
       setCreating(true);
-      const room = await createOrGetSingleChatRoom(idNum);
 
-      const r = room as ChatRoomItem;
-      const roomId = r.roomId;
-      const roomName = r.roomName || "채팅방";
+      // ✅ [수정 2] 생성 API 호출 결과 처리 방식 변경
+      // createOrGetSingleChatRoom은 ChatRoomResponse(간략 정보)를 반환합니다.
+      // 이를 ChatRoomItem(상세 정보)으로 강제 형변환(as)하면 type, unreadCount가 없어서 에러가 납니다.
+      const response = await createOrGetSingleChatRoom(idNum);
 
-      if (!roomId) {
+      if (!response.roomId) {
         Alert.alert("오류", "생성된 채팅방 ID를 찾을 수 없어요.");
         return;
       }
@@ -143,8 +143,11 @@ export default function ChatListScreen() {
       setShowCreate(false);
       setPartnerId("");
 
+      // 1. 목록 새로고침 (이때 완전한 ChatRoomItem 정보를 받아와서 스토어에 넣음)
       await fetchRooms();
-      goRoom(roomId, roomName);
+
+      // 2. 채팅방으로 이동 (생성 결과에서 ID와 이름만 사용)
+      goRoom(response.roomId, response.roomName || "채팅방");
     } catch (err: any) {
       console.error("[ChatList] 1:1 채팅방 생성 실패:", err);
       if (err instanceof ApiError) {
@@ -206,7 +209,18 @@ export default function ChatListScreen() {
             </View>
           }
           renderItem={({ item }) => {
+            // 스토어에 저장된 데이터는 이미 ChatRoomItem 형식이므로 안심하고 사용
             const roomItem = item as ChatRoomItem;
+
+            // 메시지 우선순위 처리
+            const displayMessage =
+              roomItem.lastMessageContent &&
+              roomItem.lastMessageContent.trim() !== ""
+                ? roomItem.lastMessageContent
+                : roomItem.lastMessage && roomItem.lastMessage.trim() !== ""
+                ? roomItem.lastMessage
+                : "대화 내용이 없습니다.";
+
             return (
               <Pressable
                 style={styles.roomRow}
@@ -223,31 +237,52 @@ export default function ChatListScreen() {
                     style={{
                       flexDirection: "row",
                       justifyContent: "space-between",
-                      marginBottom: 2,
+                      marginBottom: 4,
                     }}
                   >
                     <Text style={styles.roomName} numberOfLines={1}>
                       {roomItem.roomName || "알 수 없는 채팅방"}
                     </Text>
-                    {/* ✅ [추가] 마지막 메시지 시간 표시 (선택 사항) */}
-                    {/* {roomItem.lastMessageAt && (
-                      <Text style={{ fontSize: 11, color: "#aaa" }}>
-                        {new Date(roomItem.lastMessageAt).toLocaleDateString()}
-                      </Text>
-                    )} */}
                   </View>
 
-                  {/* ✅ [확인] 마지막 대화 내용 표시 */}
-                  {/* 새로고침 시 안 보인다면, 서버 응답의 필드명(예: lastMessageContent)을 확인해야 합니다. */}
-                  {/* 여기서는 lastMessage가 있으면 보여주고, 없으면 기본 문구를 보여줍니다. */}
-                  <Text
-                    style={{ fontSize: 13, color: "#888" }}
-                    numberOfLines={1}
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                    }}
                   >
-                    {roomItem.lastMessage && roomItem.lastMessage.trim() !== ""
-                      ? roomItem.lastMessage
-                      : "대화 내용이 없습니다."}
-                  </Text>
+                    <Text
+                      style={{ fontSize: 13, color: "#888", flex: 1 }}
+                      numberOfLines={1}
+                    >
+                      {displayMessage}
+                    </Text>
+
+                    {/* 안 읽은 메시지 배지 */}
+                    {roomItem.unreadCount > 0 && (
+                      <View
+                        style={{
+                          backgroundColor: "#FF4444",
+                          borderRadius: 10,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          marginLeft: 8,
+                          minWidth: 18,
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "white",
+                            fontSize: 10,
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {roomItem.unreadCount}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
               </Pressable>
             );
@@ -255,7 +290,7 @@ export default function ChatListScreen() {
         />
       )}
 
-      {/* 모달 관련 코드는 변경 없음 */}
+      {/* 생성 모달 (기존 유지) */}
       <Modal
         visible={showCreate}
         transparent
