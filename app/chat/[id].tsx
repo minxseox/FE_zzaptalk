@@ -373,7 +373,6 @@ export default function ChatRoomScreen() {
     }
   }, [roomIdOrNull, redirectOnce, setMessages, updateRoomLastMessage]);
 
-  // ⭐️ 2. [수정] initialLoad 호출을 단 한번으로 제한
   useEffect(() => {
     if (!navReady) return;
     if (roomIdOrNull == null) return;
@@ -388,11 +387,6 @@ export default function ChatRoomScreen() {
 
     initialLoad();
     resetUnreadCount(roomIdOrNull);
-
-    // 💡 클린업: 채팅방 ID가 바뀌면 (다른 채팅방으로 이동 시) 플래그를 재설정하여 새 방의 로딩을 허용
-    return () => {
-      initialLoadRef.current = false;
-    };
   }, [navReady, roomIdOrNull, initialLoad, resetUnreadCount]);
 
   // ✅ [중요] 메시지 길이가 달라지면 바닥으로 스크롤 (useLayoutEffect + onContentSizeChange 이중 안전장치)
@@ -530,7 +524,7 @@ export default function ChatRoomScreen() {
       unsub?.();
       subscribedRef.current = false;
     };
-  }, [roomIdOrNull, myId, removeMessageByIdNow, subscribeRoom]);
+  }, [roomIdOrNull, myId, removeMessageByIdNow]);
 
   if (!navReady) return null;
   if (roomIdOrNull == null) return <Redirect href={"/chatlist" as Href} />;
