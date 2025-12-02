@@ -1,5 +1,5 @@
 // MessageInput.tsx
-import React from "react";
+import React, { useState } from "react"; // ✅ useState 추가
 import {
   Pressable,
   TextInput,
@@ -26,14 +26,19 @@ export default function MessageInput({
   inputRef,
   onHeight,
 }: Props) {
+  // ✅ 1. 한글 입력(조합) 상태 관리
+  const [isComposing, setIsComposing] = useState(false);
+
   const handleKeyPress = (
     e: NativeSyntheticEvent<TextInputKeyPressEventData>
   ) => {
     if (Platform.OS !== "web") return;
 
     const ne: any = e.nativeEvent; // ✅ shiftKey / preventDefault 우회
-    if (ne?.key === "Enter" && !ne?.shiftKey) {
-      // ✅ 줄바꿈 방지: preventDefault는 web에서만 있을 수도 있어서 optional 처리
+
+    // ✅ 2. !isComposing 조건 추가: 한글 조합 중이 아닐 때만 전송
+    if (ne?.key === "Enter" && !ne?.shiftKey && !isComposing) {
+      // ✅ 줄바꿈 방지
       ne.preventDefault?.();
       (e as any).preventDefault?.();
 
@@ -68,6 +73,12 @@ export default function MessageInput({
           onSubmitEditing={Platform.OS !== "web" ? onSend : undefined}
           blurOnSubmit={false}
           textAlignVertical="center"
+          // ✅ 3. 웹 환경(React Native Web)에서 Composition 이벤트 바인딩
+          // React Native 타입 정의에는 없지만, 웹에서는 정상 동작하므로 ts-ignore 처리
+          // @ts-ignore
+          onCompositionStart={() => setIsComposing(true)}
+          // @ts-ignore
+          onCompositionEnd={() => setIsComposing(false)}
         />
 
         <Pressable
