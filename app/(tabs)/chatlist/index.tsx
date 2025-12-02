@@ -24,6 +24,7 @@ import { ApiError } from "../../../src/lib/api";
 import styles from "../../../src/styles/chat/ChatList.module";
 
 // ✅ [수정 1] 스토어 타입(ChatRoomUserListItem)과 100% 일치시킴
+// type과 unreadCount를 필수로 지정하여 TS 에러 방지
 interface ChatRoomItem {
   roomId: number;
   type: "SINGLE" | "GROUP"; // 필수
@@ -57,7 +58,7 @@ export default function ChatListScreen() {
   const [partnerId, setPartnerId] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ✅ [수정 2] 정렬 로직: 단순 입장/퇴장 시 순서 변경 방지
+  // ✅ [수정 2] 정렬 로직: 단순 입장/퇴장 시 순서 변경 방지 (메시지 시간 or 생성 시간 기준)
   const fetchRooms = useCallback(
     async (isRefresh = false) => {
       try {
@@ -119,6 +120,7 @@ export default function ChatListScreen() {
   );
 
   // ✅ [수정 3] 채팅방 생성 후 에러(ts 2352) 해결 로직
+  // 'as ChatRoomItem'을 제거하고, 목록 갱신(fetchRooms)을 통해 온전한 데이터를 받아옵니다.
   const onCreateSingle = useCallback(async () => {
     const trimmed = partnerId.trim();
     if (!trimmed) {
@@ -135,11 +137,8 @@ export default function ChatListScreen() {
     try {
       setCreating(true);
 
-      // API 호출 (ChatRoomResponse 반환)
+      // API 호출 (이 응답에는 type, unreadCount가 없을 수 있음)
       const response = await createOrGetSingleChatRoom(idNum);
-
-      // ⚠️ 중요: 여기서 'as ChatRoomItem'을 하지 않습니다.
-      // API 응답에는 unreadCount나 type 정보가 없을 수 있기 때문입니다.
 
       if (!response.roomId) {
         Alert.alert("오류", "생성된 채팅방 ID를 찾을 수 없어요.");
@@ -152,7 +151,7 @@ export default function ChatListScreen() {
       // 1. 전체 목록을 서버에서 다시 불러옴 (이때 완전한 데이터가 스토어에 들어감)
       await fetchRooms();
 
-      // 2. 채팅방으로 이동 (ID와 이름만 사용)
+      // 2. 채팅방으로 이동 (단순히 ID와 이름만 있으면 이동 가능)
       goRoom(response.roomId, response.roomName || "채팅방");
     } catch (err: any) {
       console.error("[ChatList] 1:1 채팅방 생성 실패:", err);
