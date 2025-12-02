@@ -446,10 +446,20 @@ export default function ChatRoomScreen() {
     [roomIdOrNull]
   );
 
-  // 🚨 [핵심 수정 4] 소켓 리스너 로직 수정: clientTempId를 사용하여 메시지 교체
+  const subscribedRef = useRef(false);
+
   useEffect(() => {
     if (!subscribeRoom) return;
     if (roomIdOrNull == null) return;
+
+    // 이미 구독 중이면 리턴하여 중복 구독을 원천 차단
+    if (subscribedRef.current) {
+      console.log("🚫 [Socket] 이미 구독 중이므로 재구독 방지.");
+      return;
+    }
+
+    subscribedRef.current = true; // 구독 시작 플래그 설정
+    console.log(`✅ [Socket] 구독 시작: /topic/chat/room/${roomIdOrNull}`);
 
     const addMsg = useChatStore.getState().addMessage;
     const updateLast = useChatListStore.getState().updateRoomLastMessage;
@@ -487,19 +497,12 @@ export default function ChatRoomScreen() {
             return;
           }
 
-          // B. 내가 보낸 메시지이지만 clientTempId가 없는 경우 (❌ 중복 추가 발생 지점)
-          //    -> 이 경우는 내 메시지가 DB에 저장된 후, 서버가 토픽으로 다시 뿌려주는 메시지입니다.
-          //    -> 이미 낙관적 업데이트로 화면에 있으므로, 이 메시지는 **무조건 무시**해야 합니다.
-          //    -> (clientTempId가 없는 내 메시지는 중복이므로 무시)
           console.log(
             `🚫 [Socket] 내가 보낸 메시지 (교체 아님) 무시:`,
             normalized
           );
           return;
         }
-        // 🚨 [수정된 로직 종료]
-
-        // C. 타인이 보낸 메시지 (기존 로직 유지)
 
         // 이미 로컬에 있는 영구 ID인지 확인하여 무시
         if (idSetRef.current.has(permanentKey)) {
@@ -522,8 +525,12 @@ export default function ChatRoomScreen() {
       }
     );
 
-    return () => unsub?.();
-  }, [roomIdOrNull, myId, removeMessageByIdNow]); // removeMessageByIdNow를 의존성 배열에 추가
+    return () => {
+      console.log(`❌ [Socket] 구독 해제: /topic/chat/room/${roomIdOrNull}`);
+      unsub?.();
+      subscribedRef.current = false;
+    };
+  }, [roomIdOrNull, myId, removeMessageByIdNow, subscribeRoom]);
 
   if (!navReady) return null;
   if (roomIdOrNull == null) return <Redirect href={"/chatlist" as Href} />;
