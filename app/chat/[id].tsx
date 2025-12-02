@@ -397,7 +397,7 @@ export default function ChatRoomScreen() {
     [roomIdOrNull]
   );
 
-  // ✅ 소켓 메시지 수신부 (변경 없음, 여기에서만 메시지 추가됨)
+  // ✅ [수정] 소켓 메시지 수신부: "내 메시지는 무시"하여 중복 방지
   useEffect(() => {
     if (!subscribeRoom) return;
     if (roomIdOrNull == null) return;
@@ -411,20 +411,26 @@ export default function ChatRoomScreen() {
       const normalized = normalizeRestMessage(m);
       const key = String(normalized.messageId);
 
-      // 이미 받은 메시지(혹은 내가 보낸 메시지)가 중복으로 오는지 확인
-      if (idSetRef.current.has(key)) {
-        console.log("♻️ 중복 메시지 무시:", key);
+      // 1. 내가 보낸 메시지라면 스킵 (onSend에서 이미 그렸으므로)
+      if (myId && normalized.senderId === myId) {
+        console.log("✋ 내가 보낸 메시지라 소켓 수신은 건너뜀 (중복 방지)");
         return;
       }
 
-      // 새로운 메시지면 화면에 추가
+      // 2. 이미 받은 메시지인지 확인 (혹시 모를 중복 방지)
+      if (idSetRef.current.has(key)) {
+        console.log("♻️ 중복 ID 메시지 무시:", key);
+        return;
+      }
+
+      // 3. 상대방 메시지라면 화면에 추가
       idSetRef.current.add(key);
       addMsg(roomIdOrNull, normalized);
       updateLast(roomIdOrNull, normalized.content, normalized.createdAt, true);
     });
 
     return () => unsub?.();
-  }, [roomIdOrNull]);
+  }, [roomIdOrNull, myId]); // myId가 바뀔 때도 재구독 체크 (필수)
 
   if (!navReady) return null;
   if (roomIdOrNull == null) return <Redirect href={"/chatlist" as Href} />;
@@ -500,7 +506,7 @@ export default function ChatRoomScreen() {
     [deleteLocalMessage, sendContent]
   );
 
-  // ✅ [수정] onSend: "내가 보낸 메시지 미리 그리기" 기능 제거 -> 중복 방지
+  // ✅ [수정] onSend: "화면에 즉시 그리고(실시간성 보장)", 서버로 전송
   const onSend = useCallback(async () => {
     console.log("🚀 onSend 실행됨. 텍스트:", text);
 
@@ -517,29 +523,47 @@ export default function ChatRoomScreen() {
       return;
     }
 
-    // 1. 입력창 비우기 (UI 반응)
+    // 1. 입력창 비우기
     setText("");
 
-    // 2. 임시 ID 생성 (전송 함수용)
-    const msgId = Date.now() + Math.floor(Math.random() * 1000);
+    // 2. 임시 ID 및 데이터 생성
+    const tempId = Date.now() + Math.floor(Math.random() * 1000);
+    const nowIso = new Date().toISOString();
 
-    // --- [삭제됨] 낙관적 업데이트 로직 (화면 미리 추가) 제거 ---
-    // 이제 화면 추가는 위쪽 '소켓 메시지 수신부' useEffect에서 담당합니다.
-    // -----------------------------------------------------
+    const optimisticMsg: ChatMessageResponse = {
+      messageId: tempId as any,
+      roomId: roomIdOrNull,
+      senderId: myId,
+      content: t,
+      createdAt: nowIso,
+      sentAt: nowIso,
+      senderName: "Me",
+      type: "TEXT",
+    };
 
-    // 3. 소켓 전송
-    await sendContent(msgId, t);
+    // 3. 화면에 즉시 추가 (안 보이는 문제 해결)
+    idSetRef.current.add(String(tempId)); // 미리 ID 등록해둠
+    addMessage(roomIdOrNull, optimisticMsg);
+    updateRoomLastMessage(roomIdOrNull, t, nowIso, true);
 
-    // 4. 입력창 포커스 유지
+    // 4. 스크롤 내리기
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => safeScrollToBottom(true));
+    });
+
+    // 5. 소켓 전송
+    await sendContent(tempId, t);
+
+    // 6. 입력창 포커스
     inputRef.current?.focus();
   }, [
     initialLoading,
     text,
     myId,
-    // roomIdOrNull, // sendContent에서 사용하므로 의존성 제거 가능
-    // addMessage,   // 더 이상 사용 안 함
-    // updateRoomLastMessage, // 더 이상 사용 안 함
-    // safeScrollToBottom,    // 소켓 수신 시 자동 스크롤되므로 제거 가능
+    roomIdOrNull,
+    addMessage,
+    updateRoomLastMessage,
+    safeScrollToBottom,
     sendContent,
   ]);
 
