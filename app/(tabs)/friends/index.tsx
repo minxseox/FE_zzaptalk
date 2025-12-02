@@ -201,6 +201,20 @@ export default function FriendsScreen() {
     setMenuVisible(true);
   };
 
+  // --- [추가] 친구 클릭 시 채팅방으로 이동 ---
+  const handleEnterChat = (friend: Friend) => {
+    router.push({
+      // 1. pathname은 실제 파일 경로와 똑같이 적어줍니다.
+      pathname: "/chat/[id]",
+
+      // 2. 동적인 값(id)과 추가 데이터(targetName)는 모두 params에 넣습니다.
+      params: {
+        id: friend.id, // 여기서 [id] 부분이 채워집니다.
+        targetName: friend.name,
+      },
+    });
+  };
+
   const handleToggleFavorite = async () => {
     if (!selectedFriend) return;
     setMenuVisible(false);
@@ -526,10 +540,12 @@ export default function FriendsScreen() {
             <View
               style={[styles.friendRow, { justifyContent: "space-between" }]}
             >
-              {/* 왼쪽: 프로필 사진 + 이름 영역 (누르면 프로필 이동 등 확장 가능) */}
+              {/* 왼쪽: 프로필 사진 + 이름 영역 */}
+              {/* onPress 시 handleEnterChat 호출 */}
               <Pressable
                 style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
                 onLongPress={() => handleLongPressFriend(item)}
+                onPress={() => handleEnterChat(item)}
               >
                 <View style={styles.friendAvatar}>
                   <Text style={styles.friendAvatarInitial}>
@@ -768,7 +784,7 @@ export default function FriendsScreen() {
                       >
                         <Text style={styles.menuItemText}>삭제</Text>
                       </TouchableOpacity>
-                      {/* ✅ [연결] 차단 버튼 */}
+                      {/* 차단 버튼 */}
                       <TouchableOpacity
                         style={styles.menuItem}
                         onPress={handleBlockFriend}
