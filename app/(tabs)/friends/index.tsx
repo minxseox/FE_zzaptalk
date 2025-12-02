@@ -215,7 +215,6 @@ export default function FriendsScreen() {
         pathname: "/chat/[id]",
         params: {
           id: String(response.roomId),
-          targetName: friend.name,
           title: friend.name,
         },
       });
