@@ -66,15 +66,20 @@ export async function createOrGetSingleChatRoom(
   }
 
   try {
+    // ⭐️ [수정된 부분] 경로 변수 (Path Variable) 방식으로 변경:
+    // 백엔드 엔드포인트: POST /api/chat/rooms/single/{targetUserId}
     return await post<ChatRoomResponse>(
-      PATH.SINGLE,
-      { targetUserId },
+      `${PATH.SINGLE}/${targetUserId}`, // 경로에 targetUserId를 포함
+      undefined, // 요청 본문(body)은 비웁니다.
       { signal }
     );
   } catch (err) {
     throw wrapError(err, "1:1 채팅방 생성 실패");
   }
 }
+
+// ⭐️ [추가된 부분] FriendsScreen에서 import한 findOrCreateSingleChatRoom의 별칭 설정
+export const findOrCreateSingleChatRoom = createOrGetSingleChatRoom;
 
 /* ==================================
  * 그룹 채팅방 생성
