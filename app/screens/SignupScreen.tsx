@@ -142,9 +142,9 @@ export default function SignupScreen() {
               <Text style={styles.backButtonText}>‹</Text>
             </Pressable>
             <Image
-              source={require("../../src/assets/images/signuplog.png")}
-              style={styles.logoImg}
-              resizeMode="contain"
+            //  source={require("../../src/assets/images/signuplog.png")}
+            // style={styles.logoImg}
+            //resizeMode="contain"
             />
           </View>
 
