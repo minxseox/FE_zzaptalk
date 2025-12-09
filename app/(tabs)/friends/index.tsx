@@ -59,7 +59,7 @@ function formatPhoneNumber(value: string) {
 }
 
 export default function FriendsScreen() {
-  const [myName, setMyName] = useState("사용자");
+  const [myName, setMyName] = useState("김연성");
   const [myAvatarUri, setMyAvatarUri] = useState<string | null>(null);
 
   const [friends, setFriends] = useState<Friend[]>([]);
